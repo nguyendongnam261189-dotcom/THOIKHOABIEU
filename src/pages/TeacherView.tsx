@@ -19,7 +19,7 @@ export const TeacherView: React.FC = () => {
       const allTeachers = await teacherService.getAllTeachers();
       setSchedules(allSchedules);
       
-      // Sắp xếp giáo viên theo Alphabet để bảng đẹp hơn
+      // Sắp xếp giáo viên theo Alphabet (Lấy tên cuối)
       const sortedTeachers = allTeachers.sort((a, b) => {
           const nameA = a.name.split(' ').pop() || '';
           const nameB = b.name.split(' ').pop() || '';
@@ -62,7 +62,7 @@ export const TeacherView: React.FC = () => {
     return matchName && matchSubject && matchGroup && matchSession;
   });
 
-  // GOM NHÓM GIÁO VIÊN THEO TỔ CHUYÊN MÔN
+  // GOM NHÓM THEO TỔ CHUYÊN MÔN
   const groupedTeachers = useMemo(() => {
     const groups: Record<string, Teacher[]> = {};
     filteredTeachers.forEach(t => {
@@ -138,7 +138,7 @@ export const TeacherView: React.FC = () => {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
         <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-            <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
+              <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
             </h2>
             <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-semibold text-sm">
                 Tổng số: {filteredTeachers.length} Giáo viên
@@ -194,7 +194,7 @@ export const TeacherView: React.FC = () => {
           </select>
         </div>
 
-        {/* DANH SÁCH GIÁO VIÊN ĐƯỢC GOM NHÓM THEO TỔ */}
+        {/* DANH SÁCH GIÁO VIÊN ĐƯỢC GOM NHÓM DẠNG BẢNG */}
         {!selectedTeacher && (
           <div className="space-y-8 animate-in fade-in">
             {Object.keys(groupedTeachers).sort().map((groupName) => (
@@ -213,9 +213,9 @@ export const TeacherView: React.FC = () => {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-white">
                             <tr>
-                                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-16">STT</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Họ và tên Giáo viên</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Môn giảng dạy</th>
+                                <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20 bg-gray-50/50">STT</th>
+                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase bg-gray-50/50">Họ và tên Giáo viên</th>
+                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase bg-gray-50/50">Môn giảng dạy</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-100">
@@ -225,9 +225,9 @@ export const TeacherView: React.FC = () => {
                                     onClick={() => setSelectedTeacher(teacher.name)}
                                     className="hover:bg-indigo-50 cursor-pointer transition-colors"
                                 >
-                                    <td className="px-4 py-3 text-sm text-gray-500 text-center font-medium">{index + 1}</td>
-                                    <td className="px-4 py-3 text-sm font-semibold text-indigo-700">{teacher.name}</td>
-                                    <td className="px-4 py-3 text-sm text-gray-600">{teacher.subject}</td>
+                                    <td className="px-6 py-3 text-sm text-gray-500 text-center font-medium">{index + 1}</td>
+                                    <td className="px-6 py-3 text-sm font-semibold text-indigo-700">{teacher.name}</td>
+                                    <td className="px-6 py-3 text-sm text-gray-600">{teacher.subject}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -244,7 +244,7 @@ export const TeacherView: React.FC = () => {
           </div>
         )}
 
-        {/* XEM CHI TIẾT TKB */}
+        {/* XEM CHI TIẾT TKB CỦA GIÁO VIÊN */}
         {selectedTeacher && (
           <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex justify-between items-center mb-4">

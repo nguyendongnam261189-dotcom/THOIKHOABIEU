@@ -55,6 +55,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -178,36 +179,40 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
-  // --- THUẬT TOÁN TẠO ẢNH ĐƯỢC TỐI ƯU ---
-  const handleGenerateImage = async () => {
+  // --- HÀM TẠO ẢNH AN TOÀN ---
+  const handleGenerateImage = () => {
     if (!printRef.current) return;
     setIsGenerating(true);
     
-    try {
-      // Đợi 300ms để React render mượt mà nút "Đang xử lý" trước khi vẽ ảnh
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      const canvas = await html2canvas(printRef.current, {
-        backgroundColor: '#ffffff',
-        scale: 2, 
-        useCORS: true,
-        logging: false
-      });
+    // Đợi 1 chút để UI ổn định trước khi chụp
+    setTimeout(async () => {
+      try {
+        const element = printRef.current as HTMLElement;
+        
+        const canvas = await html2canvas(element, {
+          backgroundColor: '#ffffff',
+          scale: 2, 
+          useCORS: true,
+          logging: false
+        });
 
-      canvas.toBlob((blob) => {
+        // Đóng gói ảnh bằng DataURL rồi chuyển sang Blob để tránh lỗi tương thích
+        const dataUrl = canvas.toDataURL('image/png');
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+
         if (blob) {
           setGeneratedBlob(blob);
         } else {
-          alert('Lỗi tạo ảnh: Không thể đóng gói dữ liệu (Blob).');
+          alert('Lỗi tạo ảnh: Không thể tạo Blob dữ liệu.');
         }
+      } catch (error: any) {
+        console.error('Lỗi khi vẽ ảnh:', error);
+        alert(`Lỗi tạo ảnh: ${error.message || 'Lỗi không xác định'}. Thầy/cô thử F5 tải lại trang nhé.`);
+      } finally {
         setIsGenerating(false);
-      }, 'image/png');
-
-    } catch (error) {
-      console.error('Lỗi khi vẽ ảnh:', error);
-      alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
-      setIsGenerating(false);
-    }
+      }
+    }, 200);
   };
 
   const handleCopyReadyImage = async () => {
@@ -220,8 +225,9 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 3000);
     } catch (error) {
-      console.error('Lỗi clipboard:', error);
-      alert('Trình duyệt bảo mật không hỗ trợ Copy trực tiếp. Vui lòng bấm nút Tải Ảnh bên cạnh!');
+      console.warn('Lỗi clipboard, tự động mở modal:', error);
+      const url = URL.createObjectURL(generatedBlob);
+      setPreviewImage(url);
     }
   };
 
@@ -229,10 +235,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     if (!generatedBlob) return;
     const url = URL.createObjectURL(generatedBlob);
     const link = document.createElement('a');
-    link.download = `DayThay_${exportDate.replace(/ /g, '_')}.png`;
+    link.download = `PhanCongDayThay_${exportDate.replace(/ /g, '_')}.png`;
     link.href = url;
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000); // Dọn dẹp RAM
   };
 
   const renderMiniSchedule = (teacherName: string, activeSlot: any) => {
@@ -437,15 +443,9 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
              </div>
            </div>
            
-           {/* Khu vực chứa vùng chụp ảnh, cho phép scroll ngang nhưng bên trong vẫn giữ nguyên kích thước */}
-           <div className="w-full overflow-x-auto rounded-xl relative">
-             
-             {isGenerating && (
-                <div className="absolute inset-0 bg-white/60 z-10"></div>
-             )}
-             
-             {/* VÙNG ĐƯỢC CHỤP ẢNH: Khóa cứng `w-max inline-block` để nội dung bung hết cỡ, không bị cắt xén */}
-             <div ref={printRef} className="bg-white p-6 print:p-0 min-w-full w-max inline-block">
+           {/* KHU VỰC VÙNG CHỤP ẢNH - Cấu trúc CSS an toàn chống cắt */}
+           <div className="w-full overflow-x-auto bg-white rounded-xl">
+             <div ref={printRef} className="p-6 print:p-0 bg-white min-w-max">
                <div className="text-center mb-8">
                  <input 
                    type="text" 
@@ -503,6 +503,51 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
              </div>
            </div>
         </div>
+
+        {/* MODAL XEM TRƯỚC ẢNH KHI TRÌNH DUYỆT CHẶN COPY */}
+        {previewImage && (
+          <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <h3 className="font-bold text-gray-800 text-lg">📸 Ảnh báo cáo đã sẵn sàng!</h3>
+                <button 
+                  onClick={() => setPreviewImage(null)} 
+                  className="text-gray-500 hover:text-red-600 bg-gray-200 hover:bg-red-100 rounded-full p-1.5 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-4 bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-sm text-center">
+                <span className="font-bold">Trình duyệt đã chặn Copy tự động.</span> Thầy/cô vui lòng 
+                <span className="font-bold text-red-600 uppercase mx-1">Nhấn chuột phải vào ảnh bên dưới</span> 
+                (hoặc nhấn giữ nếu dùng điện thoại) và chọn <span className="font-bold">"Sao chép hình ảnh"</span> để dán vào Zalo nhé.
+              </div>
+              
+              <div className="p-6 overflow-y-auto bg-gray-200 flex justify-center items-start flex-1">
+                <img 
+                  src={previewImage} 
+                  alt="Kết quả dạy thay" 
+                  className="max-w-full h-auto border border-gray-300 shadow-md rounded bg-white" 
+                />
+              </div>
+              
+              <div className="p-4 border-t border-gray-100 bg-white flex justify-center">
+                <button 
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.download = `PhanCongDayThay_${exportDate.replace(/ /g, '_')}.png`;
+                    link.href = previewImage;
+                    link.click();
+                  }} 
+                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-indigo-700 flex items-center transition-colors shadow-sm"
+                >
+                  <Download className="w-5 h-5 mr-2" /> Hoặc Tải ảnh xuống máy
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

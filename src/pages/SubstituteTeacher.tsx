@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X } from 'lucide-react';
+import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check } from 'lucide-react';
 import { normalizeSubjectName } from '../utils/subjectUtils';
+import html2canvas from 'html2canvas';
 
 interface Assignment {
   id: string;
@@ -40,7 +41,22 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   
   const [isExporting, setIsExporting] = useState(false);
   const [exportTitle, setExportTitle] = useState('PHÂN CÔNG DẠY THAY');
-  const [exportDate, setExportDate] = useState('');
+  
+  // Hàm tạo chuỗi ngày tháng mặc định
+  const getDefaultDateString = () => {
+    const today = new Date();
+    const day = today.getDate().toString().padStart(2, '0');
+    const month = (today.getMonth() + 1).toString().padStart(2, '0');
+    const year = today.getFullYear();
+    return `Ngày ${day} tháng ${month} năm ${year}`;
+  };
+  
+  const [exportDate, setExportDate] = useState(() => getDefaultDateString());
+
+  // Trạng thái cho việc chụp ảnh
+  const [isCopying, setIsCopying] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -62,7 +78,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
 
   const handleRemoveAbsentTeacher = (name: string) => {
     setSelectedAbsentTeachers(selectedAbsentTeachers.filter(t => t !== name));
-    // Optionally remove assignments for this teacher
     const newAssignments = { ...assignments };
     let changed = false;
     Object.keys(newAssignments).forEach(key => {
@@ -82,12 +97,9 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
 
     const availableTeachers = teachers.filter(t => {
       if (t.name === slot.absentTeacher) return false;
-      if (t.group !== group) return false; // Rule 1: Same department
-      
-      // Rule 2: TTCM can only see their own department
+      if (t.group !== group) return false; 
       if (role === 'ttcm' && department && t.group !== department) return false;
 
-      // Check if busy
       const isBusy = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period && s.buoi === slot.session);
       return !isBusy;
     });
@@ -96,12 +108,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       let score = 0;
       let reasons: string[] = [];
 
-      // Check teachable subjects
       const normalizedSlotSubject = normalizeSubjectName(slot.subject);
       const teacherSubjects = t.teachableSubjects?.map(s => normalizeSubjectName(s)) || [];
       let canTeachSubject = teacherSubjects.includes(normalizedSlotSubject);
       
-      // KHTN teacher can teach Lý, Hóa, Sinh
       if (!canTeachSubject && teacherSubjects.includes('KHTN')) {
         if (['Lý', 'Hóa', 'Sinh'].includes(normalizedSlotSubject)) {
           canTeachSubject = true;
@@ -109,7 +119,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       }
 
       if (canTeachSubject) {
-        score += 1000; // High priority for teachers who can teach the subject
+        score += 1000; 
         reasons.push('Dạy đúng môn');
       } else {
         reasons.push('Dạy trái môn');
@@ -129,7 +139,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         reasons.push('Đang dạy buổi này');
       }
 
-      // Rule 3: Adjacent periods
       const hasAdjacentBefore = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period - 1 && s.buoi === slot.session);
       const hasAdjacentAfter = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period + 1 && s.buoi === slot.session);
       
@@ -163,6 +172,43 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setActiveSlot(null);
     setSelectedSub(null);
     setSubNotes('');
+  };
+
+  // Hàm xử lý Copy Ảnh
+  const handleCopyImage = async () => {
+    if (!printRef.current) return;
+    setIsCopying(true);
+    setCopySuccess(false);
+    
+    try {
+      const canvas = await html2canvas(printRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2, // Tăng độ phân giải
+      });
+
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          try {
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 3000);
+          } catch (clipboardError) {
+            console.error('Lỗi clipboard, chuyển sang tải file:', clipboardError);
+            const link = document.createElement('a');
+            link.download = `PhanCongDayThay_${new Date().toISOString().split('T')[0]}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            alert('Trình duyệt không hỗ trợ copy trực tiếp. Hệ thống đã tự động tải ảnh về máy của bạn!');
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Lỗi khi tạo ảnh:', error);
+      alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
+    } finally {
+      setIsCopying(false);
+    }
   };
 
   const renderMiniSchedule = (teacherName: string, activeSlot: any) => {
@@ -320,65 +366,85 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
            <button onClick={() => setIsExporting(false)} className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center">
              ← Quay lại
            </button>
-           <button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center shadow-sm">
-             <Printer className="w-4 h-4 mr-2" /> In danh sách
-           </button>
+           <div className="flex gap-3">
+             <button 
+                onClick={handleCopyImage} 
+                disabled={isCopying}
+                className={`text-white px-4 py-2 rounded-lg flex items-center shadow-sm transition-colors ${
+                  copySuccess ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+             >
+               {isCopying ? (
+                 <span className="animate-pulse">Đang tạo ảnh...</span>
+               ) : copySuccess ? (
+                 <><Check className="w-4 h-4 mr-2" /> Đã Copy</>
+               ) : (
+                 <><Copy className="w-4 h-4 mr-2" /> Copy Ảnh (Zalo)</>
+               )}
+             </button>
+             <button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center shadow-sm">
+               <Printer className="w-4 h-4 mr-2" /> In danh sách
+             </button>
+           </div>
          </div>
          
-         <div className="text-center mb-8">
-           <input 
-             type="text" 
-             value={exportTitle} 
-             onChange={e => setExportTitle(e.target.value)} 
-             className="text-2xl font-bold text-center w-full border-none focus:ring-0 print:p-0 uppercase" 
-           />
-           <input 
-             type="text" 
-             value={exportDate} 
-             onChange={e => setExportDate(e.target.value)} 
-             placeholder="Nhập ngày tháng năm (VD: Ngày 20 tháng 10 năm 2023)" 
-             className="text-center w-full border-none focus:ring-0 text-gray-600 mt-2 print:p-0 italic" 
-           />
-         </div>
-  
-         <table className="w-full border-collapse border border-gray-800 text-sm">
-           <thead>
-             <tr className="bg-gray-100">
-               <th className="border border-gray-800 p-2">STT</th>
-               <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
-               <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
-               <th className="border border-gray-800 p-2">Lớp</th>
-               <th className="border border-gray-800 p-2">Thứ</th>
-               <th className="border border-gray-800 p-2">Buổi</th>
-               <th className="border border-gray-800 p-2">Tiết</th>
-               <th className="border border-gray-800 p-2">Môn</th>
-               <th className="border border-gray-800 p-2">Ghi chú</th>
-             </tr>
-           </thead>
-           <tbody>
-             {Object.values(assignments).length === 0 ? (
-               <tr>
-                 <td colSpan={9} className="border border-gray-800 p-4 text-center text-gray-500 italic">
-                   Chưa có dữ liệu phân công dạy thay.
-                 </td>
+         {/* Khu vực sẽ được chụp ảnh nằm trong printRef */}
+         <div ref={printRef} className="bg-white p-6 print:p-0">
+           <div className="text-center mb-8">
+             <input 
+               type="text" 
+               value={exportTitle} 
+               onChange={e => setExportTitle(e.target.value)} 
+               className="text-2xl font-bold text-center w-full border-none focus:ring-0 print:p-0 uppercase bg-transparent" 
+             />
+             <input 
+               type="text" 
+               value={exportDate} 
+               onChange={e => setExportDate(e.target.value)} 
+               placeholder="Nhập ngày tháng năm (VD: Ngày 20 tháng 10 năm 2023)" 
+               className="text-center w-full border-none focus:ring-0 text-gray-600 mt-2 print:p-0 italic bg-transparent" 
+             />
+           </div>
+    
+           <table className="w-full border-collapse border border-gray-800 text-sm">
+             <thead>
+               <tr className="bg-gray-100">
+                 <th className="border border-gray-800 p-2">STT</th>
+                 <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
+                 <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
+                 <th className="border border-gray-800 p-2">Lớp</th>
+                 <th className="border border-gray-800 p-2">Thứ</th>
+                 <th className="border border-gray-800 p-2">Buổi</th>
+                 <th className="border border-gray-800 p-2">Tiết</th>
+                 <th className="border border-gray-800 p-2">Môn</th>
+                 <th className="border border-gray-800 p-2">Ghi chú</th>
                </tr>
-             ) : (
-               (Object.values(assignments) as Assignment[]).map((a, idx) => (
-                 <tr key={a.id}>
-                   <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
-                   <td className="border border-gray-800 p-2">{a.absentTeacher}</td>
-                   <td className="border border-gray-800 p-2 font-bold">{a.substituteTeacher}</td>
-                   <td className="border border-gray-800 p-2 text-center">{a.className}</td>
-                   <td className="border border-gray-800 p-2 text-center">{a.day}</td>
-                   <td className="border border-gray-800 p-2 text-center">{a.session}</td>
-                   <td className="border border-gray-800 p-2 text-center">{a.period}</td>
-                   <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
-                   <td className="border border-gray-800 p-2">{a.notes}</td>
+             </thead>
+             <tbody>
+               {Object.values(assignments).length === 0 ? (
+                 <tr>
+                   <td colSpan={9} className="border border-gray-800 p-4 text-center text-gray-500 italic">
+                     Chưa có dữ liệu phân công dạy thay.
+                   </td>
                  </tr>
-               ))
-             )}
-           </tbody>
-         </table>
+               ) : (
+                 (Object.values(assignments) as Assignment[]).map((a, idx) => (
+                   <tr key={a.id}>
+                     <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
+                     <td className="border border-gray-800 p-2">{a.absentTeacher}</td>
+                     <td className="border border-gray-800 p-2 font-bold">{a.substituteTeacher}</td>
+                     <td className="border border-gray-800 p-2 text-center">{a.className}</td>
+                     <td className="border border-gray-800 p-2 text-center">{a.day}</td>
+                     <td className="border border-gray-800 p-2 text-center">{a.session}</td>
+                     <td className="border border-gray-800 p-2 text-center">{a.period}</td>
+                     <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
+                     <td className="border border-gray-800 p-2">{a.notes}</td>
+                   </tr>
+                 ))
+               )}
+             </tbody>
+           </table>
+         </div>
       </div>
     );
   }
@@ -460,7 +526,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
               {/* Left Pane: Teacher List */}
               <div className="w-full md:w-1/2 p-4 md:p-6 overflow-y-auto border-b md:border-b-0 md:border-r border-gray-200 bg-white">
-                {/* Existing Assignment */}
                 {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`] && (
                   <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex justify-between items-center shadow-sm">
                     <div>
@@ -580,4 +645,3 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     </div>
   );
 };
-

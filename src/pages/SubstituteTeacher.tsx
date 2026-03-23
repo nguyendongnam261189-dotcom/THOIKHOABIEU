@@ -178,20 +178,38 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
+  // --- THUẬT TOÁN CHỐNG CẮT ẢNH ---
   const handleGenerateImage = () => {
     if (!printRef.current) return;
     setIsGenerating(true);
     
-    // Dùng setTimeout để React cập nhật nút "Đang xử lý..." trước khi html2canvas khóa luồng
     setTimeout(async () => {
       try {
-        const canvas = await html2canvas(printRef.current as HTMLElement, {
+        const element = printRef.current as HTMLElement;
+        
+        // 1. Lưu lại vị trí cuộn hiện tại
+        const originalScrollY = window.scrollY;
+        const originalScrollX = window.scrollX;
+        
+        // 2. Cuộn lên đầu trang (0,0) để tránh lỗi html2canvas lấy sai tọa độ
+        window.scrollTo(0, 0);
+        
+        const canvas = await html2canvas(element, {
           backgroundColor: '#ffffff',
           scale: 2, 
           useCORS: true,
-          allowTaint: true,
-          logging: false
+          logging: false,
+          // 3. Ép cứng kích thước theo đúng chiều rộng/cao thật của nội dung bên trong
+          width: element.scrollWidth,
+          height: element.scrollHeight,
+          windowWidth: element.scrollWidth,
+          windowHeight: element.scrollHeight,
+          x: 0,
+          y: 0
         });
+
+        // 4. Trả lại vị trí cuộn cũ cho người dùng
+        window.scrollTo(originalScrollX, originalScrollY);
 
         canvas.toBlob((blob) => {
           if (blob) {
@@ -437,13 +455,13 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
              </div>
            </div>
            
-           <div className="relative">
+           <div className="relative overflow-hidden min-w-max md:min-w-full">
              {isGenerating && (
                 <div className="absolute inset-0 bg-white/60 z-10 rounded-xl"></div>
              )}
              
              {/* VÙNG ĐƯỢC CHỤP ẢNH */}
-             <div ref={printRef} className="bg-white p-6 print:p-0 rounded-xl">
+             <div ref={printRef} className="bg-white p-6 print:p-0 rounded-xl min-w-full w-max">
                <div className="text-center mb-8">
                  <input 
                    type="text" 
@@ -464,14 +482,14 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                  <thead>
                    <tr className="bg-gray-100">
                      <th className="border border-gray-800 p-2">STT</th>
-                     <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
-                     <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
+                     <th className="border border-gray-800 p-2 min-w-[120px]">Giáo viên nghỉ</th>
+                     <th className="border border-gray-800 p-2 min-w-[150px]">Giáo viên dạy thay</th>
                      <th className="border border-gray-800 p-2">Lớp</th>
                      <th className="border border-gray-800 p-2">Thứ</th>
                      <th className="border border-gray-800 p-2">Buổi</th>
                      <th className="border border-gray-800 p-2">Tiết</th>
                      <th className="border border-gray-800 p-2">Môn</th>
-                     <th className="border border-gray-800 p-2">Ghi chú</th>
+                     <th className="border border-gray-800 p-2 min-w-[150px]">Ghi chú</th>
                    </tr>
                  </thead>
                  <tbody>
@@ -485,13 +503,13 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                      (Object.values(assignments) as Assignment[]).map((a, idx) => (
                        <tr key={a.id}>
                          <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
-                         <td className="border border-gray-800 p-2 font-medium">{a.absentTeacher}</td>
-                         <td className="border border-gray-800 p-2 font-bold text-indigo-700">{a.substituteTeacher}</td>
-                         <td className="border border-gray-800 p-2 text-center font-medium">{a.className}</td>
+                         <td className="border border-gray-800 p-2 font-medium whitespace-nowrap">{a.absentTeacher}</td>
+                         <td className="border border-gray-800 p-2 font-bold text-indigo-700 whitespace-nowrap">{a.substituteTeacher}</td>
+                         <td className="border border-gray-800 p-2 text-center font-medium whitespace-nowrap">{a.className}</td>
                          <td className="border border-gray-800 p-2 text-center">{a.day}</td>
                          <td className="border border-gray-800 p-2 text-center">{a.session}</td>
                          <td className="border border-gray-800 p-2 text-center">{a.period}</td>
-                         <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
+                         <td className="border border-gray-800 p-2 text-center whitespace-nowrap">{a.subject}</td>
                          <td className="border border-gray-800 p-2">{a.notes}</td>
                        </tr>
                      ))

@@ -73,10 +73,24 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       const allSchedules = await scheduleService.getAllSchedules();
       const allTeachers = await teacherService.getAllTeachers();
       setSchedules(allSchedules);
-      setTeachers(allTeachers);
+      
+      // PHÂN QUYỀN: Cắt gọn danh sách GV theo Tổ nếu là TTCM
+      let allowedTeachers = allTeachers;
+      if (role !== 'admin' && department) {
+        allowedTeachers = allTeachers.filter(t => t.group === department);
+      }
+
+      // SẮP XẾP THEO ALPHABET ĐỂ DỄ TÌM KIẾM TRÊN ĐIỆN THOẠI
+      const sortedTeachers = allowedTeachers.sort((a, b) => {
+          const nameA = a.name.split(' ').pop() || '';
+          const nameB = b.name.split(' ').pop() || '';
+          return nameA.localeCompare(nameB, 'vi');
+      });
+
+      setTeachers(sortedTeachers);
     };
     fetchData();
-  }, [isTeacherRole]);
+  }, [isTeacherRole, role, department]);
 
   if (isTeacherRole) {
     return (

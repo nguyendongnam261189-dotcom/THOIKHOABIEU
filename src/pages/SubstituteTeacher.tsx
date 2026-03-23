@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check } from 'lucide-react';
+import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { normalizeSubjectName } from '../utils/subjectUtils';
 import html2canvas from 'html2canvas';
 
@@ -42,7 +42,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [isExporting, setIsExporting] = useState(false);
   const [exportTitle, setExportTitle] = useState('PHÂN CÔNG DẠY THAY');
   
-  // Hàm tạo chuỗi ngày tháng mặc định
   const getDefaultDateString = () => {
     const today = new Date();
     const day = today.getDate().toString().padStart(2, '0');
@@ -53,10 +52,17 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   
   const [exportDate, setExportDate] = useState(() => getDefaultDateString());
 
-  // Trạng thái cho việc chụp ảnh
-  const [isCopying, setIsCopying] = useState(false);
+  // --- LOGIC TẠO ẢNH MỚI THEO Ý TƯỞNG CỦA THẦY ---
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+
+  // Nếu người dùng thay đổi dữ liệu hoặc tiêu đề, xóa ảnh cũ đi để bắt tạo lại
+  useEffect(() => {
+    setGeneratedBlob(null);
+    setCopySuccess(false);
+  }, [assignments, exportTitle, exportDate]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -174,41 +180,60 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
-  // Hàm xử lý Copy Ảnh
-  const handleCopyImage = async () => {
+  // 1. Hàm vẽ ảnh lưu vào bộ nhớ (Tách riêng)
+  const handleGenerateImage = async () => {
     if (!printRef.current) return;
-    setIsCopying(true);
-    setCopySuccess(false);
+    setIsGenerating(true);
     
     try {
       const canvas = await html2canvas(printRef.current, {
         backgroundColor: '#ffffff',
-        scale: 2, // Tăng độ phân giải
+        scale: 2, 
+        useCORS: true,
+        logging: false
       });
 
-      canvas.toBlob(async (blob) => {
+      canvas.toBlob((blob) => {
         if (blob) {
-          try {
-            const item = new ClipboardItem({ 'image/png': blob });
-            await navigator.clipboard.write([item]);
-            setCopySuccess(true);
-            setTimeout(() => setCopySuccess(false), 3000);
-          } catch (clipboardError) {
-            console.error('Lỗi clipboard, chuyển sang tải file:', clipboardError);
-            const link = document.createElement('a');
-            link.download = `PhanCongDayThay_${new Date().toISOString().split('T')[0]}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            alert('Trình duyệt không hỗ trợ copy trực tiếp. Hệ thống đã tự động tải ảnh về máy của bạn!');
-          }
+          setGeneratedBlob(blob);
+        } else {
+          alert('Lỗi tạo ảnh nội bộ.');
         }
-      });
+        setIsGenerating(false);
+      }, 'image/png');
+
     } catch (error) {
-      console.error('Lỗi khi tạo ảnh:', error);
+      console.error('Lỗi khi vẽ ảnh:', error);
       alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
-    } finally {
-      setIsCopying(false);
+      setIsGenerating(false);
     }
+  };
+
+  // 2. Hàm copy ngay lập tức (Vì ảnh đã có sẵn)
+  const handleCopyReadyImage = async () => {
+    if (!generatedBlob) return;
+    
+    try {
+      const item = new ClipboardItem({ 'image/png': generatedBlob });
+      await navigator.clipboard.write([item]);
+      
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 3000);
+    } catch (error) {
+      console.error('Lỗi clipboard:', error);
+      alert('Trình duyệt không hỗ trợ Copy. Vui lòng bấm nút Tải Ảnh bên cạnh!');
+    }
+  };
+
+  // 3. Hàm tải ảnh (Dành cho ai thích tải file)
+  const handleDownloadReadyImage = () => {
+    if (!generatedBlob) return;
+    const url = URL.createObjectURL(generatedBlob);
+    const link = document.createElement('a');
+    link.download = `DayThay_${exportDate.replace(/ /g, '_')}.png`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url); // Dọn dẹp bộ nhớ
   };
 
   const renderMiniSchedule = (teacherName: string, activeSlot: any) => {
@@ -361,90 +386,122 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
 
   if (isExporting) {
     return (
-      <div className="bg-white p-8 max-w-5xl mx-auto print:p-0 print:max-w-none">
-         <div className="flex justify-between items-center mb-6 print:hidden">
-           <button onClick={() => setIsExporting(false)} className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center">
-             ← Quay lại
-           </button>
-           <div className="flex gap-3">
-             <button 
-                onClick={handleCopyImage} 
-                disabled={isCopying}
-                className={`text-white px-4 py-2 rounded-lg flex items-center shadow-sm transition-colors ${
-                  copySuccess ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-             >
-               {isCopying ? (
-                 <span className="animate-pulse">Đang tạo ảnh...</span>
-               ) : copySuccess ? (
-                 <><Check className="w-4 h-4 mr-2" /> Đã Copy</>
+      <div className="bg-gray-50 min-h-screen py-8 print:py-0 print:bg-white">
+        <div className="bg-white p-8 max-w-5xl mx-auto shadow-md rounded-xl border border-gray-200 print:shadow-none print:border-none print:p-0 print:max-w-none">
+           <div className="flex flex-wrap justify-between items-center mb-6 gap-4 print:hidden border-b pb-4">
+             <button onClick={() => setIsExporting(false)} className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-lg transition-colors">
+               ← Trở lại thiết lập
+             </button>
+             
+             {/* THANH CÔNG CỤ XUẤT ẢNH THÔNG MINH */}
+             <div className="flex gap-2 flex-wrap bg-gray-50 p-2 rounded-lg border border-gray-200">
+               {!generatedBlob ? (
+                 <button 
+                    onClick={handleGenerateImage} 
+                    disabled={isGenerating}
+                    className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-5 py-2 rounded-md flex items-center shadow-sm text-sm font-medium transition-colors"
+                 >
+                   {isGenerating ? (
+                     <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Đang xử lý ảnh...</>
+                   ) : (
+                     <><ImageIcon className="w-4 h-4 mr-2" /> Tạo ảnh Báo cáo</>
+                   )}
+                 </button>
                ) : (
-                 <><Copy className="w-4 h-4 mr-2" /> Copy Ảnh (Zalo)</>
+                 <>
+                   <button 
+                      onClick={handleCopyReadyImage} 
+                      className={`text-white px-5 py-2 rounded-md flex items-center shadow-sm transition-colors text-sm font-medium ${
+                        copySuccess ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-600 hover:bg-blue-700'
+                      }`}
+                   >
+                     {copySuccess ? <><Check className="w-4 h-4 mr-2" /> Đã Copy thành công</> : <><Copy className="w-4 h-4 mr-2" /> Copy Ảnh (Zalo)</>}
+                   </button>
+                   
+                   <button 
+                      onClick={handleDownloadReadyImage}
+                      className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-4 py-2 rounded-md flex items-center shadow-sm text-sm font-medium transition-colors"
+                   >
+                     <Download className="w-4 h-4 mr-2" /> Tải Ảnh
+                   </button>
+                 </>
                )}
-             </button>
-             <button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center shadow-sm">
-               <Printer className="w-4 h-4 mr-2" /> In danh sách
-             </button>
+               
+               <div className="w-px bg-gray-300 mx-1"></div>
+               
+               <button 
+                  onClick={() => window.print()} 
+                  className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-md flex items-center shadow-sm text-sm font-medium transition-colors"
+               >
+                 <Printer className="w-4 h-4 mr-2" /> In tài liệu
+               </button>
+             </div>
            </div>
-         </div>
-         
-         {/* Khu vực sẽ được chụp ảnh nằm trong printRef */}
-         <div ref={printRef} className="bg-white p-6 print:p-0">
-           <div className="text-center mb-8">
-             <input 
-               type="text" 
-               value={exportTitle} 
-               onChange={e => setExportTitle(e.target.value)} 
-               className="text-2xl font-bold text-center w-full border-none focus:ring-0 print:p-0 uppercase bg-transparent" 
-             />
-             <input 
-               type="text" 
-               value={exportDate} 
-               onChange={e => setExportDate(e.target.value)} 
-               placeholder="Nhập ngày tháng năm (VD: Ngày 20 tháng 10 năm 2023)" 
-               className="text-center w-full border-none focus:ring-0 text-gray-600 mt-2 print:p-0 italic bg-transparent" 
-             />
-           </div>
-    
-           <table className="w-full border-collapse border border-gray-800 text-sm">
-             <thead>
-               <tr className="bg-gray-100">
-                 <th className="border border-gray-800 p-2">STT</th>
-                 <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
-                 <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
-                 <th className="border border-gray-800 p-2">Lớp</th>
-                 <th className="border border-gray-800 p-2">Thứ</th>
-                 <th className="border border-gray-800 p-2">Buổi</th>
-                 <th className="border border-gray-800 p-2">Tiết</th>
-                 <th className="border border-gray-800 p-2">Môn</th>
-                 <th className="border border-gray-800 p-2">Ghi chú</th>
-               </tr>
-             </thead>
-             <tbody>
-               {Object.values(assignments).length === 0 ? (
-                 <tr>
-                   <td colSpan={9} className="border border-gray-800 p-4 text-center text-gray-500 italic">
-                     Chưa có dữ liệu phân công dạy thay.
-                   </td>
+           
+           {/* Khu vực chụp ảnh/In ấn */}
+           <div ref={printRef} className="bg-white p-6 print:p-0 rounded-xl relative">
+             {/* Lớp phủ mờ khi đang tạo ảnh */}
+             {isGenerating && (
+                <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] z-10 flex justify-center items-center rounded-xl">
+                </div>
+             )}
+
+             <div className="text-center mb-8">
+               <input 
+                 type="text" 
+                 value={exportTitle} 
+                 onChange={e => setExportTitle(e.target.value)} 
+                 className="text-2xl font-bold text-center w-full border-none focus:ring-0 print:p-0 uppercase bg-transparent text-gray-900" 
+               />
+               <input 
+                 type="text" 
+                 value={exportDate} 
+                 onChange={e => setExportDate(e.target.value)} 
+                 placeholder="Nhập ngày tháng năm (VD: Ngày 20 tháng 10 năm 2023)" 
+                 className="text-center w-full border-none focus:ring-0 text-gray-600 mt-2 print:p-0 italic bg-transparent" 
+               />
+             </div>
+      
+             <table className="w-full border-collapse border border-gray-800 text-sm">
+               <thead>
+                 <tr className="bg-gray-100">
+                   <th className="border border-gray-800 p-2">STT</th>
+                   <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
+                   <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
+                   <th className="border border-gray-800 p-2">Lớp</th>
+                   <th className="border border-gray-800 p-2">Thứ</th>
+                   <th className="border border-gray-800 p-2">Buổi</th>
+                   <th className="border border-gray-800 p-2">Tiết</th>
+                   <th className="border border-gray-800 p-2">Môn</th>
+                   <th className="border border-gray-800 p-2">Ghi chú</th>
                  </tr>
-               ) : (
-                 (Object.values(assignments) as Assignment[]).map((a, idx) => (
-                   <tr key={a.id}>
-                     <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
-                     <td className="border border-gray-800 p-2">{a.absentTeacher}</td>
-                     <td className="border border-gray-800 p-2 font-bold">{a.substituteTeacher}</td>
-                     <td className="border border-gray-800 p-2 text-center">{a.className}</td>
-                     <td className="border border-gray-800 p-2 text-center">{a.day}</td>
-                     <td className="border border-gray-800 p-2 text-center">{a.session}</td>
-                     <td className="border border-gray-800 p-2 text-center">{a.period}</td>
-                     <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
-                     <td className="border border-gray-800 p-2">{a.notes}</td>
+               </thead>
+               <tbody>
+                 {Object.values(assignments).length === 0 ? (
+                   <tr>
+                     <td colSpan={9} className="border border-gray-800 p-4 text-center text-gray-500 italic">
+                       Chưa có dữ liệu phân công dạy thay.
+                     </td>
                    </tr>
-                 ))
-               )}
-             </tbody>
-           </table>
-         </div>
+                 ) : (
+                   (Object.values(assignments) as Assignment[]).map((a, idx) => (
+                     <tr key={a.id}>
+                       <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
+                       <td className="border border-gray-800 p-2 font-medium">{a.absentTeacher}</td>
+                       <td className="border border-gray-800 p-2 font-bold text-indigo-700">{a.substituteTeacher}</td>
+                       <td className="border border-gray-800 p-2 text-center font-medium">{a.className}</td>
+                       <td className="border border-gray-800 p-2 text-center">{a.day}</td>
+                       <td className="border border-gray-800 p-2 text-center">{a.session}</td>
+                       <td className="border border-gray-800 p-2 text-center">{a.period}</td>
+                       <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
+                       <td className="border border-gray-800 p-2">{a.notes}</td>
+                     </tr>
+                   ))
+                 )}
+               </tbody>
+             </table>
+           </div>
+        </div>
       </div>
     );
   }

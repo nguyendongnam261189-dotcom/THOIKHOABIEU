@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
@@ -23,28 +23,54 @@ export const TeacherView: React.FC = () => {
     fetchData();
   }, []);
 
+  // BƯỚC 1: Quét toàn bộ TKB để xác định giáo viên dạy buổi nào
+  const teacherSessions = useMemo(() => {
+    const map = new Map<string, { sang: boolean, chieu: boolean }>();
+    schedules.forEach(s => {
+      if (!map.has(s.giao_vien)) {
+        map.set(s.giao_vien, { sang: false, chieu: false });
+      }
+      const t = map.get(s.giao_vien)!;
+      if (s.buoi === 'Sáng') t.sang = true;
+      if (s.buoi === 'Chiều') t.chieu = true;
+    });
+    return map;
+  }, [schedules]);
+
+  // BƯỚC 2: Áp dụng bộ lọc cho danh sách giáo viên
   const filteredTeachers = teachers.filter(t => {
     const matchName = t.name.toLowerCase().includes(searchName.toLowerCase());
     const matchSubject = filterSubject ? t.subject.split(', ').includes(filterSubject) : true;
     const matchGroup = filterGroup ? t.group === filterGroup : true;
-    return matchName && matchSubject && matchGroup;
+    
+    let matchSession = true;
+    const sessions = teacherSessions.get(t.name) || { sang: false, chieu: false };
+
+    if (filterSession === 'Sáng') {
+      matchSession = sessions.sang && !sessions.chieu; // Chỉ dạy Sáng
+    } else if (filterSession === 'Chiều') {
+      matchSession = !sessions.sang && sessions.chieu; // Chỉ dạy Chiều
+    } else if (filterSession === 'Cả ngày') {
+      matchSession = sessions.sang && sessions.chieu;  // Dạy cả 2 buổi
+    }
+
+    return matchName && matchSubject && matchGroup && matchSession;
   });
 
   const getScheduleForTeacher = (teacherName: string) => {
-    // Không cần lọc Sáng/Chiều ở đây nữa, vì bảng Grid sẽ tự động chỉ vẽ các dòng tương ứng
     return schedules.filter(s => s.giao_vien === teacherName);
   };
 
   const renderScheduleGrid = (teacherSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
 
-    // LOGIC MỚI: Định nghĩa rõ ràng Tiết 1-5 cho từng buổi
     let rowDefs: { tiet: number, buoi: 'Sáng' | 'Chiều' }[] = [];
     
-    if (filterSession === 'Sáng' || filterSession === '') {
+    // Đảm bảo hiển thị đúng lưới khi chọn các bộ lọc khác nhau
+    if (filterSession === 'Sáng' || filterSession === '' || filterSession === 'Cả ngày') {
       for (let i = 1; i <= 5; i++) rowDefs.push({ tiet: i, buoi: 'Sáng' });
     }
-    if (filterSession === 'Chiều' || filterSession === '') {
+    if (filterSession === 'Chiều' || filterSession === '' || filterSession === 'Cả ngày') {
       for (let i = 1; i <= 5; i++) rowDefs.push({ tiet: i, buoi: 'Chiều' });
     }
 
@@ -63,12 +89,11 @@ export const TeacherView: React.FC = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {rowDefs.map((row) => (
-              <tr key={`${row.buoi}-${row.tiet}`} className={row.buoi === 'Sáng' && row.tiet === 5 && filterSession === '' ? 'border-b-4 border-gray-300' : ''}>
+              <tr key={`${row.buoi}-${row.tiet}`} className={row.buoi === 'Sáng' && row.tiet === 5 && (filterSession === '' || filterSession === 'Cả ngày') ? 'border-b-4 border-gray-300' : ''}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 border-r bg-gray-50">
                   Tiết {row.tiet} ({row.buoi})
                 </td>
                 {days.map(day => {
-                  // Chỉ tìm đúng Tiết (1-5) và đúng Buổi (Sáng/Chiều)
                   const slot = teacherSchedules.find(s => s.thu === day && s.tiet === row.tiet && s.buoi === row.buoi);
                   
                   return (
@@ -134,14 +159,19 @@ export const TeacherView: React.FC = () => {
             ))}
           </select>
 
+          {/* Đã bổ sung 4 tùy chọn theo đúng yêu cầu */}
           <select
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
             value={filterSession}
-            onChange={(e) => setFilterSession(e.target.value)}
+            onChange={(e) => {
+              setFilterSession(e.target.value);
+              setSelectedTeacher(null); // Tự động thu gọn bảng TKB nếu đang mở để tránh nhầm lẫn
+            }}
           >
-            <option value="">Cả ngày</option>
-            <option value="Sáng">Sáng</option>
-            <option value="Chiều">Chiều</option>
+            <option value="">Tất cả các buổi</option>
+            <option value="Sáng">Chỉ dạy Sáng</option>
+            <option value="Chiều">Chỉ dạy Chiều</option>
+            <option value="Cả ngày">Dạy cả Sáng & Chiều</option>
           </select>
         </div>
 
@@ -158,6 +188,11 @@ export const TeacherView: React.FC = () => {
                 <span className="text-xs text-gray-500">{teacher.subject}</span>
               </button>
             ))}
+            {filteredTeachers.length === 0 && (
+              <div className="col-span-full text-center py-8 text-gray-500">
+                Không tìm thấy giáo viên nào phù hợp với điều kiện lọc.
+              </div>
+            )}
           </div>
         )}
 
@@ -170,7 +205,7 @@ export const TeacherView: React.FC = () => {
                 onClick={() => setSelectedTeacher(null)}
                 className="text-sm text-gray-600 hover:text-indigo-600 underline"
               >
-                ← Chọn giáo viên khác
+                ← Trở lại danh sách
               </button>
             </div>
             {renderScheduleGrid(getScheduleForTeacher(selectedTeacher))}

@@ -10,8 +10,16 @@ export const UserManagement: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
-  // Example departments (should ideally come from a central config or db)
-  const departments = ['Toán - Tin', 'Vật lý - Công nghệ', 'Hóa - Sinh', 'Ngữ văn', 'Ngoại ngữ', 'Sử - Địa - GDCD', 'Thể dục - QPAN'];
+  // Đã cập nhật lại danh sách tổ chuyên môn khớp với định dạng chuẩn từ file TKB
+  const departments = [
+    'Toán - Tin', 
+    'KHTN và Công nghệ', 
+    'Văn - GDCD', 
+    'Ngoại ngữ', 
+    'Sử - Địa', 
+    'Nghệ thuật - Thể chất',
+    'Chung'
+  ];
 
   useEffect(() => {
     const fetchUsers = async () => {

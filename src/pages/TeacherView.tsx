@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Search, Calendar } from 'lucide-react';
+import { Search, Calendar, Copy, Check } from 'lucide-react';
+import html2canvas from 'html2canvas';
 
 export const TeacherView: React.FC = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -12,6 +13,12 @@ export const TeacherView: React.FC = () => {
   const [filterSubject, setFilterSubject] = useState('');
   const [filterGroup, setFilterGroup] = useState('');
   const [filterSession, setFilterSession] = useState('');
+
+  // Ngày áp dụng TKB (mặc định là ngày hiện tại)
+  const [applyDate, setApplyDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [isCopying, setIsCopying] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const scheduleRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -23,7 +30,6 @@ export const TeacherView: React.FC = () => {
     fetchData();
   }, []);
 
-  // BƯỚC 1: Quét toàn bộ TKB để xác định giáo viên dạy buổi nào
   const teacherSessions = useMemo(() => {
     const map = new Map<string, { sang: boolean, chieu: boolean }>();
     schedules.forEach(s => {
@@ -37,7 +43,6 @@ export const TeacherView: React.FC = () => {
     return map;
   }, [schedules]);
 
-  // BƯỚC 2: Áp dụng bộ lọc cho danh sách giáo viên
   const filteredTeachers = teachers.filter(t => {
     const matchName = t.name.toLowerCase().includes(searchName.toLowerCase());
     const matchSubject = filterSubject ? t.subject.split(', ').includes(filterSubject) : true;
@@ -47,11 +52,11 @@ export const TeacherView: React.FC = () => {
     const sessions = teacherSessions.get(t.name) || { sang: false, chieu: false };
 
     if (filterSession === 'Sáng') {
-      matchSession = sessions.sang && !sessions.chieu; // Chỉ dạy Sáng
+      matchSession = sessions.sang && !sessions.chieu; 
     } else if (filterSession === 'Chiều') {
-      matchSession = !sessions.sang && sessions.chieu; // Chỉ dạy Chiều
+      matchSession = !sessions.sang && sessions.chieu; 
     } else if (filterSession === 'Cả ngày') {
-      matchSession = sessions.sang && sessions.chieu;  // Dạy cả 2 buổi
+      matchSession = sessions.sang && sessions.chieu;  
     }
 
     return matchName && matchSubject && matchGroup && matchSession;
@@ -61,12 +66,55 @@ export const TeacherView: React.FC = () => {
     return schedules.filter(s => s.giao_vien === teacherName);
   };
 
+  const formatDateVN = (dateString: string) => {
+    if (!dateString) return '';
+    const [year, month, day] = dateString.split('-');
+    return `${day}/${month}/${year}`;
+  };
+
+  const handleCopyImage = async () => {
+    if (!scheduleRef.current) return;
+    setIsCopying(true);
+    setCopySuccess(false);
+    
+    try {
+      // Chụp ảnh phần tử DOM
+      const canvas = await html2canvas(scheduleRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2, // Tăng độ phân giải ảnh lên gấp đôi cho nét
+      });
+
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          try {
+            // Thử copy vào Clipboard (Để dán thẳng vào Zalo)
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 3000);
+          } catch (clipboardError) {
+            console.error('Lỗi clipboard, chuyển sang tải file:', clipboardError);
+            // Nếu trình duyệt chặn không cho copy, sẽ tự động tải file ảnh về máy
+            const link = document.createElement('a');
+            link.download = `TKB_${selectedTeacher}_${applyDate}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            alert('Trình duyệt không hỗ trợ copy trực tiếp. Đã tải ảnh về máy của thầy/cô!');
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Lỗi khi tạo ảnh:', error);
+      alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
+    } finally {
+      setIsCopying(false);
+    }
+  };
+
   const renderScheduleGrid = (teacherSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
-
     let rowDefs: { tiet: number, buoi: 'Sáng' | 'Chiều' }[] = [];
     
-    // Đảm bảo hiển thị đúng lưới khi chọn các bộ lọc khác nhau
     if (filterSession === 'Sáng' || filterSession === '' || filterSession === 'Cả ngày') {
       for (let i = 1; i <= 5; i++) rowDefs.push({ tiet: i, buoi: 'Sáng' });
     }
@@ -75,7 +123,7 @@ export const TeacherView: React.FC = () => {
     }
 
     return (
-      <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-gray-200">
+      <div className="overflow-x-auto mt-4 rounded-xl shadow-sm border border-gray-200">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -159,13 +207,12 @@ export const TeacherView: React.FC = () => {
             ))}
           </select>
 
-          {/* Đã bổ sung 4 tùy chọn theo đúng yêu cầu */}
           <select
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
             value={filterSession}
             onChange={(e) => {
               setFilterSession(e.target.value);
-              setSelectedTeacher(null); // Tự động thu gọn bảng TKB nếu đang mở để tránh nhầm lẫn
+              setSelectedTeacher(null); 
             }}
           >
             <option value="">Tất cả các buổi</option>
@@ -175,7 +222,6 @@ export const TeacherView: React.FC = () => {
           </select>
         </div>
 
-        {/* Teacher Selection List */}
         {!selectedTeacher && (
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {filteredTeachers.map(teacher => (
@@ -196,19 +242,69 @@ export const TeacherView: React.FC = () => {
           </div>
         )}
 
-        {/* Selected Teacher Schedule */}
         {selectedTeacher && (
-          <div>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-indigo-700">TKB: {selectedTeacher}</h3>
+          <div className="animate-in fade-in duration-300">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
               <button 
                 onClick={() => setSelectedTeacher(null)}
                 className="text-sm text-gray-600 hover:text-indigo-600 underline"
               >
                 ← Trở lại danh sách
               </button>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+                  <span className="text-sm text-gray-600 font-medium">Ngày áp dụng:</span>
+                  <input 
+                    type="date" 
+                    value={applyDate}
+                    onChange={(e) => setApplyDate(e.target.value)}
+                    className="text-sm border-none bg-transparent focus:ring-0 text-indigo-700 font-bold p-0"
+                  />
+                </div>
+                
+                <button
+                  onClick={handleCopyImage}
+                  disabled={isCopying}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors ${
+                    copySuccess ? 'bg-green-500 hover:bg-green-600' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                >
+                  {isCopying ? (
+                    <span className="animate-pulse">Đang tạo ảnh...</span>
+                  ) : copySuccess ? (
+                    <>
+                      <Check className="w-4 h-4" /> Đã Copy thành công!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" /> Copy Ảnh (Gửi Zalo)
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-            {renderScheduleGrid(getScheduleForTeacher(selectedTeacher))}
+
+            {/* VÙNG CHỤP ẢNH - Mọi thứ bên trong ref này sẽ xuất hiện trong ảnh */}
+            <div ref={scheduleRef} className="bg-white p-6 border-2 border-indigo-100 rounded-xl">
+              <div className="text-center mb-4">
+                <h3 className="text-2xl font-bold text-indigo-800 uppercase">
+                  Thời khóa biểu - {selectedTeacher}
+                </h3>
+                <p className="text-gray-600 mt-1 italic">
+                  Áp dụng từ ngày: <span className="font-semibold text-indigo-600">{formatDateVN(applyDate)}</span>
+                </p>
+              </div>
+              
+              {renderScheduleGrid(getScheduleForTeacher(selectedTeacher))}
+              
+              <div className="mt-4 flex justify-between text-xs text-gray-400 italic">
+                <span>Trích xuất từ Hệ thống TKB Manager</span>
+                <span>Ngày tạo: {formatDateVN(new Date().toISOString().split('T')[0])}</span>
+              </div>
+            </div>
+            {/* KẾT THÚC VÙNG CHỤP ẢNH */}
+            
           </div>
         )}
       </div>

@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "Schedule": {
+      "title": "Schedule",
+      "description": "A single class schedule slot",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the schedule slot"
+        },
+        "thu": {
+          "type": "number",
+          "description": "Day of the week (2-7)"
+        },
+        "tiet": {
+          "type": "number",
+          "description": "Period number (1-10)"
+        },
+        "lop": {
+          "type": "string",
+          "description": "Class name"
+        },
+        "mon": {
+          "type": "string",
+          "description": "Subject name"
+        },
+        "giao_vien": {
+          "type": "string",
+          "description": "Teacher name"
+        },
+        "phong": {
+          "type": "string",
+          "description": "Room name"
+        },
+        "buoi": {
+          "type": "string",
+          "enum": ["Sáng", "Chiều"],
+          "description": "Morning or Afternoon session"
+        }
+      },
+      "required": ["thu", "tiet", "lop", "mon", "giao_vien", "phong", "buoi"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "A teacher in the school",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the teacher"
+        },
+        "name": {
+          "type": "string",
+          "description": "Teacher name"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject taught by the teacher"
+        },
+        "group": {
+          "type": "string",
+          "description": "Teacher's department or group"
+        }
+      },
+      "required": ["name", "subject", "group"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user of the application (Admin or Teacher)",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "teacher"],
+          "description": "User role"
+        },
+        "name": {
+          "type": "string",
+          "description": "User's full name"
+        }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/schedules/{scheduleId}": {
+      "schema": {
+        "$ref": "#/entities/Schedule"
+      },
+      "description": "Collection of all schedule slots"
+    },
+    "/teachers/{teacherId}": {
+      "schema": {
+        "$ref": "#/entities/Teacher"
+      },
+      "description": "Collection of all teachers"
+    },
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Collection of user profiles and roles"
+    }
+  }
+}

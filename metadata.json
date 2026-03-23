@@ -1,0 +1,5 @@
+{
+  "name": "Quản lý THỜI KHÓA BIỂU",
+  "description": "A school schedule management application for teachers and admins to upload, view, and manage schedules, find empty slots, and assign substitute teachers.",
+  "requestFramePermissions": []
+}

@@ -4,7 +4,7 @@ import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { normalizeSubjectName } from '../utils/subjectUtils';
-import html2canvas from 'html2canvas';
+import { toBlob } from 'html-to-image'; // SỬ DỤNG THƯ VIỆN MỚI
 
 interface Assignment {
   id: string;
@@ -179,40 +179,35 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
-  // --- HÀM TẠO ẢNH AN TOÀN ---
-  const handleGenerateImage = () => {
+  // --- HÀM TẠO ẢNH BẰNG HTML-TO-IMAGE (Siêu mượt, không lỗi màu) ---
+  const handleGenerateImage = async () => {
     if (!printRef.current) return;
     setIsGenerating(true);
     
-    // Đợi 1 chút để UI ổn định trước khi chụp
-    setTimeout(async () => {
-      try {
-        const element = printRef.current as HTMLElement;
-        
-        const canvas = await html2canvas(element, {
-          backgroundColor: '#ffffff',
-          scale: 2, 
-          useCORS: true,
-          logging: false
-        });
-
-        // Đóng gói ảnh bằng DataURL rồi chuyển sang Blob để tránh lỗi tương thích
-        const dataUrl = canvas.toDataURL('image/png');
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-
-        if (blob) {
-          setGeneratedBlob(blob);
-        } else {
-          alert('Lỗi tạo ảnh: Không thể tạo Blob dữ liệu.');
+    try {
+      // Đợi 300ms để React render mượt mà nút "Đang xử lý" trước khi vẽ ảnh
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      const blob = await toBlob(printRef.current, {
+        backgroundColor: '#ffffff',
+        pixelRatio: 2, // Tăng độ nét gấp đôi
+        style: {
+          transform: 'none', // Chống lỗi cuộn trang
+          margin: '0'
         }
-      } catch (error: any) {
-        console.error('Lỗi khi vẽ ảnh:', error);
-        alert(`Lỗi tạo ảnh: ${error.message || 'Lỗi không xác định'}. Thầy/cô thử F5 tải lại trang nhé.`);
-      } finally {
-        setIsGenerating(false);
+      });
+
+      if (blob) {
+        setGeneratedBlob(blob);
+      } else {
+        alert('Lỗi tạo ảnh: Không thể đóng gói dữ liệu (Blob rỗng).');
       }
-    }, 200);
+    } catch (error: any) {
+      console.error('Lỗi khi vẽ ảnh:', error);
+      alert(`Lỗi tạo ảnh: ${error.message || 'Lỗi không xác định'}. Thầy/cô thử tải lại trang nhé.`);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCopyReadyImage = async () => {
@@ -443,9 +438,13 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
              </div>
            </div>
            
-           {/* KHU VỰC VÙNG CHỤP ẢNH - Cấu trúc CSS an toàn chống cắt */}
-           <div className="w-full overflow-x-auto bg-white rounded-xl">
-             <div ref={printRef} className="p-6 print:p-0 bg-white min-w-max">
+           <div className="relative overflow-hidden min-w-max md:min-w-full">
+             {isGenerating && (
+                <div className="absolute inset-0 bg-white/60 z-10 rounded-xl"></div>
+             )}
+             
+             {/* VÙNG ĐƯỢC CHỤP ẢNH (Dùng cho html-to-image) */}
+             <div ref={printRef} className="bg-white p-6 print:p-0 min-w-full w-max inline-block">
                <div className="text-center mb-8">
                  <input 
                    type="text" 

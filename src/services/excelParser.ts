@@ -12,6 +12,12 @@ const getDepartmentFromSheetName = (sheetName: string): string => {
   return 'Chung';
 };
 
+// Hàm chuẩn hóa chuỗi để triệt tiêu lỗi font chữ Unicode (VD: dấu Tiếng Việt bị mã hóa lệch)
+const cleanString = (str: any): string => {
+  if (str === null || str === undefined) return '';
+  return String(str).normalize('NFC').trim();
+};
+
 export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[], teachers: Teacher[] }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -23,8 +29,40 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
 
         let uniqueSchedules: Map<string, Schedule> = new Map();
         let allTeachersMap: Map<string, Teacher> = new Map();
+
+        // ============================================================================
+        // BƯỚC 1: XÂY DỰNG TỪ ĐIỂN TỔ CHUYÊN MÔN (ĐỐI CHIẾU TIÊU ĐỀ CỘT TRÊN CÁC SHEET TỔ)
+        // ============================================================================
+        const teacherDepartmentDict = new Map<string, string>();
         
-        // Pass 1: Extract known subjects from PCGD sheet if it exists
+        workbook.SheetNames.forEach(sheetName => {
+            if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
+                const department = getDepartmentFromSheetName(sheetName);
+                if (department === 'Chung') return; // Bỏ qua sheet TKB_GV_SC chung chung
+                
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
+                
+                for (let i = 0; i < Math.min(15, jsonData.length); i++) {
+                    const row = jsonData[i] || [];
+                    const rowStr = row.map((c: any) => String(c).toLowerCase()).join('');
+                    if (rowStr.includes('thứ') || rowStr.includes('thu') || rowStr.includes('tiết') || rowStr.includes('tiet')) {
+                        // Tìm thấy dòng tiêu đề, tiến hành gom tên giáo viên
+                        for(let c = 2; c < row.length; c++) { 
+                            let teacherName = cleanString(row[c]);
+                            if (teacherName && teacherName.toLowerCase() !== 'sáng' && teacherName.toLowerCase() !== 'chiều') {
+                                teacherDepartmentDict.set(teacherName, department);
+                            }
+                        }
+                        break; 
+                    }
+                }
+            }
+        });
+
+        // ============================================================================
+        // BƯỚC 2: TÌM MÔN HỌC TỪ SHEET PCGD VÀ MÔN MẶC ĐỊNH
+        // ============================================================================
         const knownSubjects = new Set<string>();
         const pcgdSheetName = workbook.SheetNames.find(name => name.includes('PCGD'));
         if (pcgdSheetName) {
@@ -37,7 +75,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           for (let i = 0; i < Math.min(10, jsonData.length); i++) {
             const row = jsonData[i] || [];
             for (let c = 0; c < row.length; c++) {
-              const cellStr = String(row[c] || '').trim().toLowerCase();
+              const cellStr = cleanString(row[c]).toLowerCase();
               if (cellStr.includes('phân công chuyên môn') || cellStr.includes('phan cong chuyen mon')) {
                 pccmColIdx = c;
                 headerRowIdx = i;
@@ -50,7 +88,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           if (pccmColIdx !== -1) {
             for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
               const row = jsonData[i] || [];
-              const cellData = String(row[pccmColIdx] || '').trim();
+              const cellData = cleanString(row[pccmColIdx]);
               if (cellData) {
                 const lines = cellData.split('\n');
                 lines.forEach(line => {
@@ -65,13 +103,14 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
         }
         
-        // Add some common subjects just in case they are not in PCGD or slightly different
         ['Toán', 'Văn', 'Anh', 'AVăn', 'Lý', 'Hóa', 'Sinh', 'Sử', 'Địa', 'GDCD', 'Tin', 'CNghệ', 'Công nghệ', 'GDTC', 'Thể dục', 'Nghệ thuật', 'Âm nhạc', 'Mỹ thuật', 'KHTN', 'Lịch sử', 'Địa lý', 'HĐTNHN', 'CC-HĐTNHN', 'SHL', 'Chào cờ'].forEach(s => knownSubjects.add(s));
         
         const sortedKnownSubjects = Array.from(knownSubjects).sort((a, b) => b.length - a.length);
 
+        // ============================================================================
+        // BƯỚC 3: QUÉT TOÀN BỘ FILE VÀ ÁP DỤNG TỪ ĐIỂN
+        // ============================================================================
         workbook.SheetNames.forEach(sheetName => {
-          // Skip PCGD and PHONGHOC sheets to avoid parsing irrelevant data
           if (sheetName.includes('PCGD') || sheetName.includes('PHONGHOC') || sheetName.includes('PhongHoc')) {
              return;
           }
@@ -81,14 +120,12 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
 
           if (jsonData.length === 0) return;
 
-          // Determine global session (Sáng/Chiều) for this sheet
           let globalBuoi: 'Sáng' | 'Chiều' = 'Sáng';
           const sheetText = JSON.stringify(jsonData).toLowerCase();
           if (sheetText.includes('buổi chiều') || sheetName.endsWith('_C') || sheetName.includes('_C_')) {
             globalBuoi = 'Chiều';
           }
 
-          // Find the header row
           let headerRowIdx = -1;
           let thuColIdx = -1;
           let tietColIdx = -1;
@@ -98,7 +135,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             let foundThu = -1;
             let foundTiet = -1;
             for (let c = 0; c < Math.min(5, row.length); c++) {
-              const cellStr = String(row[c] || '').trim().toLowerCase();
+              const cellStr = cleanString(row[c]).toLowerCase();
               if ((cellStr === 'thứ' || cellStr === 'thu') && foundThu === -1) foundThu = c;
               if ((cellStr === 'tiết' || cellStr === 'tiet') && foundTiet === -1) foundTiet = c;
             }
@@ -111,13 +148,12 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
 
           if (headerRowIdx === -1) {
-            // Fallback: look for includes if exact match fails
             for (let i = 0; i < Math.min(15, jsonData.length); i++) {
               const row = jsonData[i] || [];
               let foundThu = -1;
               let foundTiet = -1;
               for (let c = 0; c < Math.min(5, row.length); c++) {
-                const cellStr = String(row[c] || '').trim().toLowerCase();
+                const cellStr = cleanString(row[c]).toLowerCase();
                 if ((cellStr.includes('thứ') || cellStr.includes('thu')) && foundThu === -1) foundThu = c;
                 if ((cellStr.includes('tiết') || cellStr.includes('tiet')) && foundTiet === -1) foundTiet = c;
               }
@@ -133,7 +169,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           if (headerRowIdx === -1) {
             for (let i = 0; i < Math.min(15, jsonData.length); i++) {
               const row = jsonData[i] || [];
-              const validCells = row.filter((c: any) => String(c).trim().length > 0);
+              const validCells = row.filter((c: any) => cleanString(c).length > 0);
               if (validCells.length > 4) {
                 headerRowIdx = i;
                 break;
@@ -148,24 +184,22 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             if (thuColIdx === -1) thuColIdx = 0;
             if (tietColIdx === -1) tietColIdx = 1;
 
-            // Detect if it's a Class sheet or Teacher sheet
             let classHeaderCount = 0;
             for (let c = 0; c < headerRow1.length; c++) {
-              const val = String(headerRow1[c]).trim();
+              const val = cleanString(headerRow1[c]);
               if (/^\d{1,2}\.?\/?\d{1,2}/.test(val)) {
                 classHeaderCount++;
               }
             }
             const isClassSheet = classHeaderCount >= 2 || sheetName.includes('LOP');
 
-            // Build column map
             const colMap: { [key: number]: { headerName: string, buoi: 'Sáng' | 'Chiều', homeroomTeacher?: string } } = {};
             let currentHeader = '';
             let currentHomeroomTeacher = '';
 
             for (let c = 0; c < Math.max(headerRow1.length, headerRow2.length); c++) {
-              const val1 = String(headerRow1[c] || '').trim();
-              const val2 = String(headerRow2[c] || '').trim();
+              const val1 = cleanString(headerRow1[c]);
+              const val2 = cleanString(headerRow2[c]);
 
               if (c === thuColIdx || c === tietColIdx) continue;
 
@@ -173,7 +207,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
               
               if (val1 && !isBuoiVal1) {
                 if (isClassSheet) {
-                  currentHeader = val1.replace(/\s*\(.*\)/, '').trim(); // Remove teacher name in parenthesis for class
+                  currentHeader = val1.replace(/\s*\(.*\)/, '').trim(); 
                   const match = val1.match(/\((.*?)\)/);
                   if (match) {
                     currentHomeroomTeacher = match[1].trim();
@@ -181,7 +215,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                     currentHomeroomTeacher = '';
                   }
                 } else {
-                  currentHeader = val1; // Keep teacher name as is
+                  currentHeader = val1; 
                   currentHomeroomTeacher = '';
                 }
               }
@@ -202,8 +236,8 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
               const row = jsonData[i] || [];
               if (row.length === 0) continue;
 
-              let rowThuStr = String(row[thuColIdx] || '').trim();
-              let rowTietStr = String(row[tietColIdx] || '').trim();
+              let rowThuStr = cleanString(row[thuColIdx]);
+              let rowTietStr = cleanString(row[tietColIdx]);
 
               if (rowThuStr) {
                 let parsedThu = -1;
@@ -239,15 +273,13 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
               if (!isNaN(currentTiet) && currentTiet >= 1 && currentTiet <= 15) {
                 for (let c = 0; c < row.length; c++) {
                   if (colMap[c]) {
-                    const cellData = String(row[c] || '').trim();
+                    const cellData = cleanString(row[c]);
                     if (cellData && cellData !== '') {
                       
-                      // LOGIC BÓC TÁCH DỮ LIỆU ĐÃ ĐƯỢC LÀM MỚI 100%
                       let mon = '';
                       let secondary = ''; 
                       const cleanCellData = cellData.replace(/\r/g, '').trim();
 
-                      // 1. Cố gắng tìm Môn học ở ĐẦU chuỗi
                       let matchedSubject = sortedKnownSubjects.find(s => {
                         if (cleanCellData.toUpperCase().startsWith(s.toUpperCase())) {
                           const remaining = cleanCellData.substring(s.length).trim();
@@ -260,7 +292,6 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                         mon = matchedSubject;
                         secondary = cleanCellData.substring(matchedSubject.length).replace(/^[-\n\s]+/, '').trim();
                       } 
-                      // 2. Cố gắng tìm Môn học ở CUỐI chuỗi
                       else {
                         matchedSubject = sortedKnownSubjects.find(s => {
                           if (cleanCellData.toUpperCase().endsWith(s.toUpperCase())) {
@@ -276,7 +307,6 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                         }
                       }
 
-                      // 3. Nếu vẫn không thấy, tách thủ công
                       if (!mon) {
                         if (cleanCellData.includes('-')) {
                           const parts = cleanCellData.split('-');
@@ -320,17 +350,15 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                       }
 
                       if (lop && giao_vien && giao_vien !== 'Chưa xếp' && lop !== 'Chưa xếp') {
-                        // Determine Buoi: if column has specific Buoi, use it, else use row's Buoi
                         let finalBuoi = colMap[c].buoi;
                         if (sheetName.includes('_SC') && (rowThuStr.toLowerCase().includes('sáng') || rowThuStr.toLowerCase().includes('chiều'))) {
                            finalBuoi = currentBuoiRow;
                         }
 
-                        // Normalize tiet: if it's > 5, it's likely an afternoon period (6-10). Convert to 1-5.
                         let normalizedTiet = currentTiet;
                         if (normalizedTiet > 5) {
                           normalizedTiet -= 5;
-                          finalBuoi = 'Chiều'; // Force buoi to Chiều if tiet > 5
+                          finalBuoi = 'Chiều'; 
                         }
 
                         const scheduleObj: Schedule = {
@@ -343,12 +371,10 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                           buoi: finalBuoi
                         };
 
-                        // Use a unique key to deduplicate identical schedules across different sheets
                         const key = `${currentThu}-${finalBuoi}-${normalizedTiet}-${giao_vien}-${mon}`;
                         const existingSchedule = uniqueSchedules.get(key);
                         
                         if (existingSchedule) {
-                          // If the same teacher teaches the same subject at the same time, it's a combined class
                           if (!existingSchedule.lop.split(', ').includes(lop)) {
                             existingSchedule.lop += `, ${lop}`;
                           }
@@ -356,18 +382,20 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                            uniqueSchedules.set(key, scheduleObj);
                         }
 
-                        const department = getDepartmentFromSheetName(sheetName);
+                        // LẤY TỔ CHUYÊN MÔN TỪ TỪ ĐIỂN ĐÃ XÂY DỰNG TRƯỚC ĐÓ
+                        let assignedDepartment = teacherDepartmentDict.get(giao_vien) || 'Chung';
+
                         const existingTeacher = allTeachersMap.get(giao_vien);
                         if (!existingTeacher) {
                           allTeachersMap.set(giao_vien, {
                             name: giao_vien,
                             subject: mon !== 'Theo phân công' ? mon : '',
-                            group: department
+                            group: assignedDepartment
                           });
                         } else {
-                          // Nếu giáo viên bị xếp nhầm vào tổ Chung trước đó, cập nhật lại đúng tổ
-                          if (existingTeacher.group === 'Chung' && department !== 'Chung') {
-                            existingTeacher.group = department;
+                          // Nếu trước đó rơi vào tổ Chung thì kéo lại về đúng tổ
+                          if (existingTeacher.group === 'Chung' && assignedDepartment !== 'Chung') {
+                            existingTeacher.group = assignedDepartment;
                           }
                           
                           if (mon && mon !== 'Theo phân công') {

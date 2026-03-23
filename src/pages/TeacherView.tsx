@@ -3,8 +3,11 @@ import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Search, Calendar, Users } from 'lucide-react';
+import { useAuth } from '../context/AuthContext'; // Thêm Hook để lấy thông tin user đăng nhập
 
-export const TeacherView: React.FC = () => {
+export const TeacherView: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' | null, department?: string | null }> = ({ role, department }) => {
+  const { user } = useAuth(); // Lấy thông tin user hiện tại (để biết họ tên)
+  
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [searchName, setSearchName] = useState('');
@@ -19,16 +22,30 @@ export const TeacherView: React.FC = () => {
       const allTeachers = await teacherService.getAllTeachers();
       setSchedules(allSchedules);
       
-      // Sắp xếp giáo viên theo Alphabet (Lấy tên cuối)
-      const sortedTeachers = allTeachers.sort((a, b) => {
+      // PHÂN QUYỀN: Cắt danh sách GV theo Tổ nếu không phải Admin
+      let allowedTeachers = allTeachers;
+      if (role !== 'admin' && department) {
+        allowedTeachers = allTeachers.filter(t => t.group === department);
+      }
+      
+      // Sắp xếp giáo viên: 
+      // - Nếu là tài khoản GV đang đăng nhập -> Đẩy lên đầu danh sách
+      // - Các người còn lại -> Sắp xếp theo Alphabet (Tên cuối)
+      const sortedTeachers = allowedTeachers.sort((a, b) => {
+          if (role === 'teacher' && user?.name) {
+              if (a.name === user.name) return -1;
+              if (b.name === user.name) return 1;
+          }
+          
           const nameA = a.name.split(' ').pop() || '';
           const nameB = b.name.split(' ').pop() || '';
           return nameA.localeCompare(nameB, 'vi');
       });
+      
       setTeachers(sortedTeachers);
     };
     fetchData();
-  }, []);
+  }, [role, department, user?.name]);
 
   const teacherSessions = useMemo(() => {
     const map = new Map<string, { sang: boolean, chieu: boolean }>();
@@ -136,16 +153,23 @@ export const TeacherView: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-              <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
-            </h2>
-            <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-semibold text-sm">
+        <div className="flex justify-between items-center mb-6 border-b pb-4 border-gray-100">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+                <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
+              </h2>
+              <p className="text-gray-500 text-sm mt-1">
+                {role === 'admin' 
+                  ? 'Tra cứu Thời khóa biểu của toàn bộ giáo viên trường.' 
+                  : `Tra cứu Thời khóa biểu của giáo viên trong Tổ ${department}.`}
+              </p>
+            </div>
+            <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-semibold text-sm border border-indigo-100">
                 Tổng số: {filteredTeachers.length} Giáo viên
             </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className={`grid grid-cols-1 gap-4 mb-6 ${role === 'admin' ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
@@ -163,21 +187,24 @@ export const TeacherView: React.FC = () => {
             onChange={(e) => setFilterSubject(e.target.value)}
           >
             <option value="">Tất cả môn học</option>
-            {Array.from(new Set(teachers.flatMap(t => t.subject.split(', ')))).sort().map(sub => (
+            {Array.from(new Set(teachers.flatMap(t => t.subject.split(', ')))).filter(Boolean).sort().map(sub => (
               <option key={sub} value={sub}>{sub}</option>
             ))}
           </select>
 
-          <select
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-            value={filterGroup}
-            onChange={(e) => setFilterGroup(e.target.value)}
-          >
-            <option value="">Tất cả tổ chuyên môn</option>
-            {Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort().map(grp => (
-              <option key={grp} value={grp}>{grp}</option>
-            ))}
-          </select>
+          {/* CHỈ HIỂN THỊ LỌC TỔ NẾU LÀ ADMIN */}
+          {role === 'admin' && (
+            <select
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              value={filterGroup}
+              onChange={(e) => setFilterGroup(e.target.value)}
+            >
+              <option value="">Tất cả tổ chuyên môn</option>
+              {Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort().map(grp => (
+                <option key={grp} value={grp}>{grp}</option>
+              ))}
+            </select>
+          )}
 
           <select
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
@@ -204,7 +231,7 @@ export const TeacherView: React.FC = () => {
                         <Users className="w-5 h-5 mr-2 text-indigo-600" />
                         {groupName}
                     </h3>
-                    <span className="bg-indigo-100 text-indigo-800 text-xs font-bold px-2.5 py-1 rounded-full">
+                    <span className="bg-indigo-100 text-indigo-800 text-xs font-bold px-2.5 py-1 rounded-full border border-indigo-200">
                         {groupedTeachers[groupName].length} người
                     </span>
                 </div>
@@ -213,23 +240,38 @@ export const TeacherView: React.FC = () => {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-white">
                             <tr>
-                                <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20 bg-gray-50/50">STT</th>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase bg-gray-50/50">Họ và tên Giáo viên</th>
+                                <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase w-20 bg-gray-50/50 border-r">STT</th>
+                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase bg-gray-50/50 border-r">Họ và tên Giáo viên</th>
                                 <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase bg-gray-50/50">Môn giảng dạy</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-100">
-                            {groupedTeachers[groupName].map((teacher, index) => (
-                                <tr 
-                                    key={teacher.name} 
-                                    onClick={() => setSelectedTeacher(teacher.name)}
-                                    className="hover:bg-indigo-50 cursor-pointer transition-colors"
-                                >
-                                    <td className="px-6 py-3 text-sm text-gray-500 text-center font-medium">{index + 1}</td>
-                                    <td className="px-6 py-3 text-sm font-semibold text-indigo-700">{teacher.name}</td>
-                                    <td className="px-6 py-3 text-sm text-gray-600">{teacher.subject}</td>
-                                </tr>
-                            ))}
+                            {groupedTeachers[groupName].map((teacher, index) => {
+                                const isCurrentUser = role === 'teacher' && user?.name === teacher.name;
+                                
+                                return (
+                                  <tr 
+                                      key={teacher.name} 
+                                      onClick={() => setSelectedTeacher(teacher.name)}
+                                      className={`cursor-pointer transition-colors ${
+                                        isCurrentUser ? 'bg-indigo-50/80 hover:bg-indigo-100' : 'hover:bg-indigo-50/50'
+                                      }`}
+                                  >
+                                      <td className={`px-6 py-3 text-sm text-center border-r ${isCurrentUser ? 'text-indigo-800 font-bold' : 'text-gray-500 font-medium'}`}>
+                                        {index + 1}
+                                      </td>
+                                      <td className={`px-6 py-3 text-sm border-r flex items-center ${isCurrentUser ? 'font-bold text-indigo-800' : 'font-semibold text-indigo-700'}`}>
+                                        {teacher.name}
+                                        {isCurrentUser && <span className="ml-2 bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full">Bạn</span>}
+                                      </td>
+                                      <td className="px-6 py-3 text-sm text-gray-600">
+                                        <span className={`px-2 py-1 rounded text-sm ${isCurrentUser ? 'bg-white font-semibold text-indigo-700' : 'bg-gray-100 font-medium text-gray-700'}`}>
+                                          {teacher.subject || 'Chưa phân công'}
+                                        </span>
+                                      </td>
+                                  </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>

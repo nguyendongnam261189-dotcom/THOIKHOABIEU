@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2, ShieldAlert } from 'lucide-react';
 import { normalizeSubjectName } from '../utils/subjectUtils';
-import { toBlob } from 'html-to-image'; // SỬ DỤNG THƯ VIỆN MỚI
+import { toBlob } from 'html-to-image'; 
 
 interface Assignment {
   id: string;
@@ -58,12 +58,18 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
+  // CHẶN TÀI KHOẢN GIÁO VIÊN
+  const isTeacherRole = role === 'teacher';
+
   useEffect(() => {
     setGeneratedBlob(null);
     setCopySuccess(false);
   }, [assignments, exportTitle, exportDate]);
 
   useEffect(() => {
+    // Nếu là giáo viên, không cần tải data làm gì cho nặng máy
+    if (isTeacherRole) return;
+
     const fetchData = async () => {
       const allSchedules = await scheduleService.getAllSchedules();
       const allTeachers = await teacherService.getAllTeachers();
@@ -71,7 +77,21 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       setTeachers(allTeachers);
     };
     fetchData();
-  }, []);
+  }, [isTeacherRole]);
+
+  // NẾU LÀ TÀI KHOẢN GIÁO VIÊN -> KHÔNG CHO PHÉP TRUY CẬP TRANG NÀY
+  if (isTeacherRole) {
+    return (
+        <div className="flex flex-col items-center justify-center h-96 bg-white rounded-xl shadow-sm border border-gray-200 p-8 max-w-2xl mx-auto mt-10">
+            <ShieldAlert className="w-20 h-20 text-red-500 mb-6" />
+            <h2 className="text-3xl font-bold text-gray-800 mb-3 text-center">Truy cập bị từ chối</h2>
+            <p className="text-lg text-gray-600 text-center">
+                Tính năng <span className="font-semibold text-indigo-600">Phân công Dạy thay</span> chỉ dành cho Ban giám hiệu (Admin) hoặc Tổ trưởng/Tổ phó chuyên môn.
+            </p>
+            <p className="text-sm text-gray-400 mt-6 italic">Tài khoản của bạn hiện tại là: Giáo viên bộ môn.</p>
+        </div>
+    );
+  }
 
   const handleAddAbsentTeacher = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -103,6 +123,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     const availableTeachers = teachers.filter(t => {
       if (t.name === slot.absentTeacher) return false;
       if (t.group !== group) return false; 
+      // Rule: TTCM chỉ nhìn thấy gợi ý giáo viên thay thế trong tổ của mình
       if (role === 'ttcm' && department && t.group !== department) return false;
 
       const isBusy = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period && s.buoi === slot.session);
@@ -179,20 +200,18 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
-  // --- HÀM TẠO ẢNH BẰNG HTML-TO-IMAGE (Siêu mượt, không lỗi màu) ---
   const handleGenerateImage = async () => {
     if (!printRef.current) return;
     setIsGenerating(true);
     
     try {
-      // Đợi 300ms để React render mượt mà nút "Đang xử lý" trước khi vẽ ảnh
       await new Promise(resolve => setTimeout(resolve, 300));
       
       const blob = await toBlob(printRef.current, {
         backgroundColor: '#ffffff',
-        pixelRatio: 2, // Tăng độ nét gấp đôi
+        pixelRatio: 2, 
         style: {
-          transform: 'none', // Chống lỗi cuộn trang
+          transform: 'none', 
           margin: '0'
         }
       });
@@ -233,7 +252,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     link.download = `PhanCongDayThay_${exportDate.replace(/ /g, '_')}.png`;
     link.href = url;
     link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000); // Dọn dẹp RAM
+    setTimeout(() => URL.revokeObjectURL(url), 1000); 
   };
 
   const renderMiniSchedule = (teacherName: string, activeSlot: any) => {
@@ -443,7 +462,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                 <div className="absolute inset-0 bg-white/60 z-10 rounded-xl"></div>
              )}
              
-             {/* VÙNG ĐƯỢC CHỤP ẢNH (Dùng cho html-to-image) */}
+             {/* VÙNG ĐƯỢC CHỤP ẢNH */}
              <div ref={printRef} className="bg-white p-6 print:p-0 min-w-full w-max inline-block">
                <div className="text-center mb-8">
                  <input 
@@ -567,16 +586,16 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         </div>
 
         <div className="mb-8">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Chọn giáo viên nghỉ (có thể chọn nhiều)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Chọn giáo viên nghỉ {role === 'ttcm' && `(Chỉ hiển thị Tổ ${department})`}
+          </label>
           <select
-            className="w-full max-w-md px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            className="w-full max-w-md px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
             onChange={handleAddAbsentTeacher}
             value=""
           >
             <option value="">-- Chọn giáo viên --</option>
-            {teachers
-              .filter(t => role === 'admin' || t.group === department)
-              .map(t => (
+            {teachers.map(t => (
               <option key={t.id || t.name} value={t.name}>{t.name} ({t.group})</option>
             ))}
           </select>
@@ -660,7 +679,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                   <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start">
                     <AlertCircle className="h-5 w-5 text-yellow-500 mr-2 flex-shrink-0 mt-0.5" />
                     <p className="text-sm text-yellow-700">
-                      Không tìm thấy giáo viên nào cùng tổ chuyên môn rảnh vào tiết này.
+                      Không tìm thấy giáo viên nào rảnh vào tiết này.
                     </p>
                   </div>
                 ) : (

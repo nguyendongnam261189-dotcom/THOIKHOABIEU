@@ -36,7 +36,14 @@ export const TeacherView: React.FC = () => {
 
   const renderScheduleGrid = (teacherSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
-    const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Lọc số dòng hiển thị dựa trên tuỳ chọn Sáng/Chiều
+    if (filterSession === 'Sáng') {
+      periods = [1, 2, 3, 4, 5];
+    } else if (filterSession === 'Chiều') {
+      periods = [6, 7, 8, 9, 10];
+    }
 
     return (
       <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-gray-200">
@@ -53,7 +60,7 @@ export const TeacherView: React.FC = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {periods.map(period => (
-              <tr key={period} className={period === 5 ? 'border-b-4 border-gray-300' : ''}>
+              <tr key={period} className={period === 5 && filterSession === '' ? 'border-b-4 border-gray-300' : ''}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 border-r bg-gray-50">
                   Tiết {period} {period <= 5 ? '(Sáng)' : '(Chiều)'}
                 </td>

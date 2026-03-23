@@ -3,11 +3,8 @@ import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Search, Calendar, Users } from 'lucide-react';
-import { useAuth } from '../context/AuthContext'; // Thêm Hook để lấy thông tin user đăng nhập
 
 export const TeacherView: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' | null, department?: string | null }> = ({ role, department }) => {
-  const { user } = useAuth(); // Lấy thông tin user hiện tại (để biết họ tên)
-  
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [searchName, setSearchName] = useState('');
@@ -28,15 +25,8 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' | null,
         allowedTeachers = allTeachers.filter(t => t.group === department);
       }
       
-      // Sắp xếp giáo viên: 
-      // - Nếu là tài khoản GV đang đăng nhập -> Đẩy lên đầu danh sách
-      // - Các người còn lại -> Sắp xếp theo Alphabet (Tên cuối)
+      // Sắp xếp giáo viên theo Alphabet (Lấy tên cuối)
       const sortedTeachers = allowedTeachers.sort((a, b) => {
-          if (role === 'teacher' && user?.name) {
-              if (a.name === user.name) return -1;
-              if (b.name === user.name) return 1;
-          }
-          
           const nameA = a.name.split(' ').pop() || '';
           const nameB = b.name.split(' ').pop() || '';
           return nameA.localeCompare(nameB, 'vi');
@@ -45,7 +35,7 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' | null,
       setTeachers(sortedTeachers);
     };
     fetchData();
-  }, [role, department, user?.name]);
+  }, [role, department]);
 
   const teacherSessions = useMemo(() => {
     const map = new Map<string, { sang: boolean, chieu: boolean }>();
@@ -246,32 +236,25 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' | null,
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-100">
-                            {groupedTeachers[groupName].map((teacher, index) => {
-                                const isCurrentUser = role === 'teacher' && user?.name === teacher.name;
-                                
-                                return (
-                                  <tr 
-                                      key={teacher.name} 
-                                      onClick={() => setSelectedTeacher(teacher.name)}
-                                      className={`cursor-pointer transition-colors ${
-                                        isCurrentUser ? 'bg-indigo-50/80 hover:bg-indigo-100' : 'hover:bg-indigo-50/50'
-                                      }`}
-                                  >
-                                      <td className={`px-6 py-3 text-sm text-center border-r ${isCurrentUser ? 'text-indigo-800 font-bold' : 'text-gray-500 font-medium'}`}>
-                                        {index + 1}
-                                      </td>
-                                      <td className={`px-6 py-3 text-sm border-r flex items-center ${isCurrentUser ? 'font-bold text-indigo-800' : 'font-semibold text-indigo-700'}`}>
-                                        {teacher.name}
-                                        {isCurrentUser && <span className="ml-2 bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full">Bạn</span>}
-                                      </td>
-                                      <td className="px-6 py-3 text-sm text-gray-600">
-                                        <span className={`px-2 py-1 rounded text-sm ${isCurrentUser ? 'bg-white font-semibold text-indigo-700' : 'bg-gray-100 font-medium text-gray-700'}`}>
-                                          {teacher.subject || 'Chưa phân công'}
-                                        </span>
-                                      </td>
-                                  </tr>
-                                );
-                            })}
+                            {groupedTeachers[groupName].map((teacher, index) => (
+                              <tr 
+                                  key={teacher.name} 
+                                  onClick={() => setSelectedTeacher(teacher.name)}
+                                  className="cursor-pointer transition-colors hover:bg-indigo-50/50"
+                              >
+                                  <td className="px-6 py-3 text-sm text-center border-r text-gray-500 font-medium">
+                                    {index + 1}
+                                  </td>
+                                  <td className="px-6 py-3 text-sm border-r flex items-center font-semibold text-indigo-700">
+                                    {teacher.name}
+                                  </td>
+                                  <td className="px-6 py-3 text-sm text-gray-600">
+                                    <span className="px-2 py-1 rounded text-sm bg-gray-100 font-medium text-gray-700">
+                                      {teacher.subject || 'Chưa phân công'}
+                                    </span>
+                                  </td>
+                              </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>

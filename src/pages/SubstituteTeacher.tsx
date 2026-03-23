@@ -178,54 +178,36 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
-  // --- THUẬT TOÁN CHỐNG CẮT ẢNH ---
-  const handleGenerateImage = () => {
+  // --- THUẬT TOÁN TẠO ẢNH ĐƯỢC TỐI ƯU ---
+  const handleGenerateImage = async () => {
     if (!printRef.current) return;
     setIsGenerating(true);
     
-    setTimeout(async () => {
-      try {
-        const element = printRef.current as HTMLElement;
-        
-        // 1. Lưu lại vị trí cuộn hiện tại
-        const originalScrollY = window.scrollY;
-        const originalScrollX = window.scrollX;
-        
-        // 2. Cuộn lên đầu trang (0,0) để tránh lỗi html2canvas lấy sai tọa độ
-        window.scrollTo(0, 0);
-        
-        const canvas = await html2canvas(element, {
-          backgroundColor: '#ffffff',
-          scale: 2, 
-          useCORS: true,
-          logging: false,
-          // 3. Ép cứng kích thước theo đúng chiều rộng/cao thật của nội dung bên trong
-          width: element.scrollWidth,
-          height: element.scrollHeight,
-          windowWidth: element.scrollWidth,
-          windowHeight: element.scrollHeight,
-          x: 0,
-          y: 0
-        });
+    try {
+      // Đợi 300ms để React render mượt mà nút "Đang xử lý" trước khi vẽ ảnh
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      const canvas = await html2canvas(printRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2, 
+        useCORS: true,
+        logging: false
+      });
 
-        // 4. Trả lại vị trí cuộn cũ cho người dùng
-        window.scrollTo(originalScrollX, originalScrollY);
-
-        canvas.toBlob((blob) => {
-          if (blob) {
-            setGeneratedBlob(blob);
-          } else {
-            alert('Lỗi tạo ảnh: Blob rỗng.');
-          }
-          setIsGenerating(false);
-        }, 'image/png');
-
-      } catch (error) {
-        console.error('Lỗi khi vẽ ảnh:', error);
-        alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
+      canvas.toBlob((blob) => {
+        if (blob) {
+          setGeneratedBlob(blob);
+        } else {
+          alert('Lỗi tạo ảnh: Không thể đóng gói dữ liệu (Blob).');
+        }
         setIsGenerating(false);
-      }
-    }, 150);
+      }, 'image/png');
+
+    } catch (error) {
+      console.error('Lỗi khi vẽ ảnh:', error);
+      alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
+      setIsGenerating(false);
+    }
   };
 
   const handleCopyReadyImage = async () => {
@@ -239,7 +221,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       setTimeout(() => setCopySuccess(false), 3000);
     } catch (error) {
       console.error('Lỗi clipboard:', error);
-      alert('Trình duyệt bảo mật không hỗ trợ Copy. Vui lòng bấm nút Tải Ảnh bên cạnh!');
+      alert('Trình duyệt bảo mật không hỗ trợ Copy trực tiếp. Vui lòng bấm nút Tải Ảnh bên cạnh!');
     }
   };
 
@@ -404,7 +386,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   if (isExporting) {
     return (
       <div className="bg-gray-50 min-h-screen py-8 print:py-0 print:bg-white">
-        <div className="bg-white p-8 max-w-5xl mx-auto shadow-md rounded-xl border border-gray-200 print:shadow-none print:border-none print:p-0 print:max-w-none">
+        <div className="bg-white p-4 md:p-8 max-w-5xl mx-auto shadow-md rounded-xl border border-gray-200 print:shadow-none print:border-none print:p-0 print:max-w-none">
            <div className="flex flex-wrap justify-between items-center mb-6 gap-4 print:hidden border-b pb-4">
              <button onClick={() => setIsExporting(false)} className="text-indigo-600 hover:text-indigo-800 font-medium flex items-center bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-lg transition-colors">
                ← Trở lại thiết lập
@@ -444,7 +426,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                  </>
                )}
                
-               <div className="w-px bg-gray-300 mx-1"></div>
+               <div className="w-px bg-gray-300 mx-1 hidden sm:block"></div>
                
                <button 
                   onClick={() => window.print()} 
@@ -455,13 +437,15 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
              </div>
            </div>
            
-           <div className="relative overflow-hidden min-w-max md:min-w-full">
+           {/* Khu vực chứa vùng chụp ảnh, cho phép scroll ngang nhưng bên trong vẫn giữ nguyên kích thước */}
+           <div className="w-full overflow-x-auto rounded-xl relative">
+             
              {isGenerating && (
-                <div className="absolute inset-0 bg-white/60 z-10 rounded-xl"></div>
+                <div className="absolute inset-0 bg-white/60 z-10"></div>
              )}
              
-             {/* VÙNG ĐƯỢC CHỤP ẢNH */}
-             <div ref={printRef} className="bg-white p-6 print:p-0 rounded-xl min-w-full w-max">
+             {/* VÙNG ĐƯỢC CHỤP ẢNH: Khóa cứng `w-max inline-block` để nội dung bung hết cỡ, không bị cắt xén */}
+             <div ref={printRef} className="bg-white p-6 print:p-0 min-w-full w-max inline-block">
                <div className="text-center mb-8">
                  <input 
                    type="text" 
@@ -482,14 +466,14 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                  <thead>
                    <tr className="bg-gray-100">
                      <th className="border border-gray-800 p-2">STT</th>
-                     <th className="border border-gray-800 p-2 min-w-[120px]">Giáo viên nghỉ</th>
-                     <th className="border border-gray-800 p-2 min-w-[150px]">Giáo viên dạy thay</th>
-                     <th className="border border-gray-800 p-2">Lớp</th>
-                     <th className="border border-gray-800 p-2">Thứ</th>
-                     <th className="border border-gray-800 p-2">Buổi</th>
-                     <th className="border border-gray-800 p-2">Tiết</th>
-                     <th className="border border-gray-800 p-2">Môn</th>
-                     <th className="border border-gray-800 p-2 min-w-[150px]">Ghi chú</th>
+                     <th className="border border-gray-800 p-2 whitespace-nowrap min-w-[130px]">Giáo viên nghỉ</th>
+                     <th className="border border-gray-800 p-2 whitespace-nowrap min-w-[150px]">Giáo viên dạy thay</th>
+                     <th className="border border-gray-800 p-2 whitespace-nowrap px-4">Lớp</th>
+                     <th className="border border-gray-800 p-2 px-4">Thứ</th>
+                     <th className="border border-gray-800 p-2 px-4">Buổi</th>
+                     <th className="border border-gray-800 p-2 px-4">Tiết</th>
+                     <th className="border border-gray-800 p-2 whitespace-nowrap px-4">Môn</th>
+                     <th className="border border-gray-800 p-2 min-w-[200px]">Ghi chú</th>
                    </tr>
                  </thead>
                  <tbody>

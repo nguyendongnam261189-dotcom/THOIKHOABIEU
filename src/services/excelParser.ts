@@ -12,7 +12,19 @@ const getDepartmentFromSheetName = (sheetName: string): string => {
   return 'Chung';
 };
 
-// Hàm chuẩn hóa chuỗi để triệt tiêu lỗi font chữ Unicode (VD: dấu Tiếng Việt bị mã hóa lệch)
+// CƠ CHẾ MỚI: Tự động suy luận Tổ chuyên môn dựa trên Môn học đang dạy
+const inferDepartmentFromSubject = (subject: string): string | null => {
+  if (!subject) return null;
+  const s = subject.toUpperCase();
+  if (s.includes('TOÁN') || s.includes('TIN')) return 'Toán - Tin';
+  if (s.includes('VĂN') || s.includes('GDCD')) return 'Văn - GDCD';
+  if (s.includes('ANH') || s.includes('AVĂN')) return 'Ngoại ngữ';
+  if (s.includes('KHTN') || s.includes('HÓA') || s.includes('LÝ') || s.includes('SINH') || s.includes('CÔNG NGHỆ') || s.includes('CNGHỆ')) return 'KHTN và Công nghệ';
+  if (s.includes('SỬ') || s.includes('ĐỊA') || s.includes('NDGDĐP') || s.includes('NDGĐP') || s.includes('LỊCH SỬ') || s.includes('ĐỊA LÝ')) return 'Sử - Địa';
+  if (s.includes('GDTC') || s.includes('THỂ DỤC') || s.includes('NGHỆ THUẬT') || s.includes('ÂM NHẠC') || s.includes('MỸ THUẬT')) return 'Nghệ thuật - Thể chất';
+  return null;
+};
+
 const cleanString = (str: any): string => {
   if (str === null || str === undefined) return '';
   return String(str).normalize('NFC').trim();
@@ -30,15 +42,13 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         let uniqueSchedules: Map<string, Schedule> = new Map();
         let allTeachersMap: Map<string, Teacher> = new Map();
 
-        // ============================================================================
-        // BƯỚC 1: XÂY DỰNG TỪ ĐIỂN TỔ CHUYÊN MÔN (ĐỐI CHIẾU TIÊU ĐỀ CỘT TRÊN CÁC SHEET TỔ)
-        // ============================================================================
+        // BƯỚC 1: XÂY DỰNG TỪ ĐIỂN TỔ CHUYÊN MÔN
         const teacherDepartmentDict = new Map<string, string>();
         
         workbook.SheetNames.forEach(sheetName => {
             if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
                 const department = getDepartmentFromSheetName(sheetName);
-                if (department === 'Chung') return; // Bỏ qua sheet TKB_GV_SC chung chung
+                if (department === 'Chung') return; 
                 
                 const worksheet = workbook.Sheets[sheetName];
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
@@ -47,7 +57,6 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                     const row = jsonData[i] || [];
                     const rowStr = row.map((c: any) => String(c).toLowerCase()).join('');
                     if (rowStr.includes('thứ') || rowStr.includes('thu') || rowStr.includes('tiết') || rowStr.includes('tiet')) {
-                        // Tìm thấy dòng tiêu đề, tiến hành gom tên giáo viên
                         for(let c = 2; c < row.length; c++) { 
                             let teacherName = cleanString(row[c]);
                             if (teacherName && teacherName.toLowerCase() !== 'sáng' && teacherName.toLowerCase() !== 'chiều') {
@@ -60,9 +69,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             }
         });
 
-        // ============================================================================
-        // BƯỚC 2: TÌM MÔN HỌC TỪ SHEET PCGD VÀ MÔN MẶC ĐỊNH
-        // ============================================================================
+        // BƯỚC 2: TÌM MÔN HỌC
         const knownSubjects = new Set<string>();
         const pcgdSheetName = workbook.SheetNames.find(name => name.includes('PCGD'));
         if (pcgdSheetName) {
@@ -107,9 +114,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         
         const sortedKnownSubjects = Array.from(knownSubjects).sort((a, b) => b.length - a.length);
 
-        // ============================================================================
-        // BƯỚC 3: QUÉT TOÀN BỘ FILE VÀ ÁP DỤNG TỪ ĐIỂN
-        // ============================================================================
+        // BƯỚC 3: QUÉT TOÀN BỘ FILE VÀ ÁP DỤNG LOGIC CỨU HỘ
         workbook.SheetNames.forEach(sheetName => {
           if (sheetName.includes('PCGD') || sheetName.includes('PHONGHOC') || sheetName.includes('PhongHoc')) {
              return;
@@ -382,20 +387,30 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                            uniqueSchedules.set(key, scheduleObj);
                         }
 
-                        // LẤY TỔ CHUYÊN MÔN TỪ TỪ ĐIỂN ĐÃ XÂY DỰNG TRƯỚC ĐÓ
                         let assignedDepartment = teacherDepartmentDict.get(giao_vien) || 'Chung';
 
                         const existingTeacher = allTeachersMap.get(giao_vien);
                         if (!existingTeacher) {
+                          // Nội suy tổ nếu đang bị rớt vào tổ Chung
+                          if (assignedDepartment === 'Chung' && mon && mon !== 'Theo phân công') {
+                            const inferred = inferDepartmentFromSubject(mon);
+                            if (inferred) assignedDepartment = inferred;
+                          }
+
                           allTeachersMap.set(giao_vien, {
                             name: giao_vien,
                             subject: mon !== 'Theo phân công' ? mon : '',
                             group: assignedDepartment
                           });
                         } else {
-                          // Nếu trước đó rơi vào tổ Chung thì kéo lại về đúng tổ
-                          if (existingTeacher.group === 'Chung' && assignedDepartment !== 'Chung') {
-                            existingTeacher.group = assignedDepartment;
+                          if (existingTeacher.group === 'Chung') {
+                            if (assignedDepartment !== 'Chung') {
+                              existingTeacher.group = assignedDepartment;
+                            } else if (mon && mon !== 'Theo phân công') {
+                              // Chữa cháy cho giáo viên đã bị gán nhầm tổ Chung trước đó
+                              const inferred = inferDepartmentFromSubject(mon);
+                              if (inferred) existingTeacher.group = inferred;
+                            }
                           }
                           
                           if (mon && mon !== 'Theo phân công') {

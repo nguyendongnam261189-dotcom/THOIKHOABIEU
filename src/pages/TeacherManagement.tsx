@@ -18,6 +18,9 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [filterSubject, setFilterSubject] = useState('');
   const [filterGroup, setFilterGroup] = useState('');
 
+  // Xác định giáo viên có quyền Lưu thay đổi không? (Chỉ Admin và TTCM mới được lưu)
+  const isTeacherRole = role === 'teacher';
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -25,9 +28,9 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         const allTeachers = await teacherService.getAllTeachers();
         const allSchedules = await scheduleService.getAllSchedules();
         
-        // Filter teachers based on role
+        // PHÂN QUYỀN: Cắt gọn danh sách GV ngay từ lúc tải về
         let filteredTeachers = allTeachers;
-        if (role === 'ttcm' && department) {
+        if (role !== 'admin' && department) {
           filteredTeachers = allTeachers.filter(t => t.group === department);
         }
         
@@ -40,12 +43,10 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         
         setTeachers(sortedTeachers);
 
-        // Compute subjects per department based on TKB and main subjects
         const deptSubjectsMap: Record<string, Set<string>> = {};
         const teacherToDept: Record<string, string> = {};
         const tkbSubjectsMap: Record<string, Set<string>> = {};
         
-        // Initialize with main subjects
         allTeachers.forEach(t => {
           if (t.group) {
             if (!deptSubjectsMap[t.group]) deptSubjectsMap[t.group] = new Set();
@@ -62,7 +63,6 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
           }
         });
 
-        // Add subjects from TKB
         allSchedules.forEach(s => {
           const dept = teacherToDept[s.giao_vien];
           if (s.giao_vien) {
@@ -70,7 +70,6 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
           }
           
           if (s.mon) {
-            // Split by comma in case there are multiple subjects in one cell
             const subjects = s.mon.split(',');
             subjects.forEach(sub => {
               const normalized = normalizeSubjectName(sub);
@@ -82,7 +81,6 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
           }
         });
 
-        // Convert Sets to sorted arrays
         const finalDeptSubjects: Record<string, string[]> = {};
         for (const dept in deptSubjectsMap) {
           finalDeptSubjects[dept] = Array.from(deptSubjectsMap[dept]).sort();
@@ -104,7 +102,8 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   }, [role, department]);
 
   const handleSubjectToggle = (teacherId: string | undefined, subject: string) => {
-    if (!teacherId) return;
+    // Không cho phép giáo viên thường bấm đổi môn
+    if (!teacherId || isTeacherRole) return; 
 
     setTeachers(prevTeachers => prevTeachers.map(teacher => {
       if (teacher.id === teacherId) {
@@ -119,6 +118,9 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   };
 
   const handleSave = async () => {
+    // Chặn luồng nếu là giáo viên
+    if (isTeacherRole) return;
+    
     setSaving(true);
     setStatus(null);
     try {
@@ -145,9 +147,7 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     }
   };
 
-  // --- LOGIC LỌC & GOM NHÓM THEO TỔ CHUYÊN MÔN ---
   const filteredAndGroupedTeachers = useMemo(() => {
-    // 1. Lọc giáo viên
     const filtered = teachers.filter(t => {
       const matchName = t.name.toLowerCase().includes(searchName.toLowerCase());
       const matchSubject = filterSubject ? t.subject.split(',').map(s => s.trim()).includes(filterSubject) : true;
@@ -155,7 +155,6 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       return matchName && matchSubject && matchGroup;
     });
 
-    // 2. Gom nhóm theo Tổ
     const groups: Record<string, Teacher[]> = {};
     filtered.forEach(t => {
       const groupName = t.group || 'Chưa phân tổ';
@@ -182,25 +181,32 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6 pb-4 border-b border-gray-100">
           <div>
             <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-              <Users className="mr-2 text-indigo-600" /> Quản lý Môn dạy thay
+              <Users className="mr-2 text-indigo-600" /> Quản lý Danh sách Giáo viên
             </h2>
             <p className="text-gray-500 text-sm mt-1">
-              {role === 'ttcm' ? `Chỉ hiển thị giáo viên Tổ ${department}` : 'Thiết lập các môn học mà giáo viên có thể dạy thay chéo.'}
+              {role === 'ttcm' 
+                ? `Quản lý môn dạy thay của giáo viên Tổ ${department}` 
+                : role === 'teacher'
+                  ? `Xem danh sách giáo viên Tổ ${department}`
+                  : 'Thiết lập các môn học mà giáo viên có thể dạy thay chéo.'}
             </p>
           </div>
           
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-5 py-2.5 rounded-lg flex items-center shadow-sm font-medium transition-colors w-full md:w-auto justify-center"
-          >
-            {saving ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Save className="w-5 h-5 mr-2" />}
-            Lưu tất cả thay đổi
-          </button>
+          {/* CHỈ ADMIN VÀ TTCM MỚI THẤY NÚT LƯU */}
+          {!isTeacherRole && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-5 py-2.5 rounded-lg flex items-center shadow-sm font-medium transition-colors w-full md:w-auto justify-center"
+            >
+              {saving ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Save className="w-5 h-5 mr-2" />}
+              Lưu tất cả thay đổi
+            </button>
+          )}
         </div>
 
         {/* THÔNG BÁO LƯU */}
-        {status && (
+        {status && !isTeacherRole && (
           <div className={`p-4 mb-6 rounded-lg flex items-start ${status.type === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
             {status.type === 'success' ? (
               <CheckCircle className="h-5 w-5 text-green-500 mr-2 mt-0.5" />
@@ -214,7 +220,7 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         )}
 
         {/* THANH BỘ LỌC */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 bg-gray-50 p-4 rounded-xl border border-gray-100">
+        <div className={`grid grid-cols-1 gap-4 mb-8 bg-gray-50 p-4 rounded-xl border border-gray-100 ${role === 'admin' ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
@@ -237,7 +243,8 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
             ))}
           </select>
 
-          {role !== 'ttcm' && (
+          {/* CHỈ ADMIN MỚI ĐƯỢC LỌC TỔ */}
+          {role === 'admin' && (
             <select
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
               value={filterGroup}
@@ -269,10 +276,12 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                   <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-white">
                           <tr>
-                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-16 border-r">STT</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase w-1/4 border-r">Giáo viên</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase w-1/5 border-r">Môn chính yếu</th>
-                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Cấp quyền môn có thể dạy thay</th>
+                              <th className="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase w-16 border-r bg-gray-50/50">STT</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase w-1/4 border-r bg-gray-50/50">Giáo viên</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase w-1/5 border-r bg-gray-50/50">Môn chính yếu</th>
+                              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase bg-gray-50/50">
+                                {isTeacherRole ? 'Môn được cấp quyền dạy thay' : 'Cấp quyền môn có thể dạy thay'}
+                              </th>
                           </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-100">
@@ -285,7 +294,7 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                                   </td>
                                   
                                   <td className="px-4 py-4 border-r">
-                                      <div className="text-sm font-medium text-gray-700 bg-gray-100 inline-block px-2 py-1 rounded">
+                                      <div className="text-sm font-medium text-gray-700 bg-gray-100 inline-block px-2 py-1 rounded border border-gray-200">
                                         {teacher.subject ? Array.from(new Set(teacher.subject.split(',').map(s => normalizeSubjectName(s)).filter(Boolean))).join(', ') : 'Chưa cập nhật'}
                                       </div>
                                   </td>
@@ -300,21 +309,26 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                                               const isMainSubject = mainSubjects.includes(subject);
                                               const isTkbSubject = tkbSubjects.includes(subject);
                                               const isSelected = normalizedTeachableSubjects.includes(subject) || isMainSubject || isTkbSubject;
-                                              const isDisabled = isMainSubject || isTkbSubject;
+                                              const isDisabled = isMainSubject || isTkbSubject || isTeacherRole;
                                               
+                                              // NẾU LÀ TÀI KHOẢN GIÁO VIÊN: Chỉ hiển thị những môn đã được chọn
+                                              if (isTeacherRole && !isSelected) {
+                                                return null; 
+                                              }
+
                                               return (
                                                   <button
                                                       key={subject}
                                                       onClick={() => !isDisabled && handleSubjectToggle(teacher.id, subject)}
                                                       disabled={isDisabled}
                                                       className={`px-3 py-1.5 rounded-md text-xs font-medium border shadow-sm transition-all ${
-                                                          isDisabled 
-                                                              ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' 
+                                                          isDisabled && !isSelected
+                                                              ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed hidden md:inline-block' 
                                                               : isSelected
-                                                                  ? 'bg-indigo-100 text-indigo-800 border-indigo-300 hover:bg-indigo-200 hover:border-indigo-400'
-                                                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+                                                                  ? `bg-indigo-100 text-indigo-800 border-indigo-300 ${!isTeacherRole && 'hover:bg-indigo-200 hover:border-indigo-400'}`
+                                                                  : `bg-white text-gray-600 border-gray-300 ${!isTeacherRole && 'hover:bg-gray-50 hover:border-gray-400'}`
                                                       }`}
-                                                      title={isMainSubject ? 'Môn chính thức (Mặc định chọn)' : isTkbSubject ? 'Đang dạy trong TKB (Mặc định chọn)' : 'Nhấn để Cấp quyền / Thu hồi'}
+                                                      title={isMainSubject ? 'Môn chính thức' : isTkbSubject ? 'Đang dạy trong TKB' : isTeacherRole ? 'Môn được cấp quyền' : 'Nhấn để Cấp quyền / Thu hồi'}
                                                   >
                                                       {subject}
                                                   </button>
@@ -323,6 +337,16 @@ export const TeacherManagement: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                                           
                                           {(!departmentSubjects[teacher.group] || departmentSubjects[teacher.group].length === 0) && (
                                               <span className="text-xs text-gray-400 italic">Không có môn học nào được phân bổ cho Tổ này.</span>
+                                          )}
+
+                                          {/* Trạng thái trống cho tài khoản giáo viên nếu chưa được cấp quyền môn nào ngoài môn chính */}
+                                          {isTeacherRole && (departmentSubjects[teacher.group] || []).filter(subject => {
+                                              const mainSubjects = teacher.subject ? teacher.subject.split(',').map(s => normalizeSubjectName(s)).filter(Boolean) : [];
+                                              const tkbSubjects = teacher.name ? (teacherTkbSubjects[teacher.name] || []) : [];
+                                              const normalizedTeachableSubjects = (teacher.teachableSubjects || []).map(s => normalizeSubjectName(s));
+                                              return normalizedTeachableSubjects.includes(subject) || mainSubjects.includes(subject) || tkbSubjects.includes(subject);
+                                          }).length === 0 && (
+                                            <span className="text-xs text-gray-400 italic">Chưa có môn nào được phân công.</span>
                                           )}
                                       </div>
                                   </td>

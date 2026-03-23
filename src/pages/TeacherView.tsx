@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Search, Calendar } from 'lucide-react';
+import { Search, Calendar, Users } from 'lucide-react';
 
 export const TeacherView: React.FC = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -18,7 +18,14 @@ export const TeacherView: React.FC = () => {
       const allSchedules = await scheduleService.getAllSchedules();
       const allTeachers = await teacherService.getAllTeachers();
       setSchedules(allSchedules);
-      setTeachers(allTeachers);
+      
+      // Sắp xếp giáo viên theo Alphabet để bảng đẹp hơn
+      const sortedTeachers = allTeachers.sort((a, b) => {
+          const nameA = a.name.split(' ').pop() || '';
+          const nameB = b.name.split(' ').pop() || '';
+          return nameA.localeCompare(nameB, 'vi');
+      });
+      setTeachers(sortedTeachers);
     };
     fetchData();
   }, []);
@@ -54,6 +61,17 @@ export const TeacherView: React.FC = () => {
 
     return matchName && matchSubject && matchGroup && matchSession;
   });
+
+  // GOM NHÓM GIÁO VIÊN THEO TỔ CHUYÊN MÔN
+  const groupedTeachers = useMemo(() => {
+    const groups: Record<string, Teacher[]> = {};
+    filteredTeachers.forEach(t => {
+      const groupName = t.group || 'Chưa phân tổ';
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(t);
+    });
+    return groups;
+  }, [filteredTeachers]);
 
   const getScheduleForTeacher = (teacherName: string) => {
     return schedules.filter(s => s.giao_vien === teacherName);
@@ -118,9 +136,14 @@ export const TeacherView: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-          <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
-        </h2>
+        <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+            <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
+            </h2>
+            <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-semibold text-sm">
+                Tổng số: {filteredTeachers.length} Giáo viên
+            </div>
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="relative">
@@ -151,7 +174,7 @@ export const TeacherView: React.FC = () => {
             onChange={(e) => setFilterGroup(e.target.value)}
           >
             <option value="">Tất cả tổ chuyên môn</option>
-            {Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).map(grp => (
+            {Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort().map(grp => (
               <option key={grp} value={grp}>{grp}</option>
             ))}
           </select>
@@ -171,33 +194,64 @@ export const TeacherView: React.FC = () => {
           </select>
         </div>
 
+        {/* DANH SÁCH GIÁO VIÊN ĐƯỢC GOM NHÓM THEO TỔ */}
         {!selectedTeacher && (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {filteredTeachers.map(teacher => (
-              <button
-                key={teacher.id || teacher.name}
-                onClick={() => setSelectedTeacher(teacher.name)}
-                className="p-3 text-sm border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-300 transition-colors text-left flex flex-col"
-              >
-                <span className="font-semibold text-gray-800">{teacher.name}</span>
-                <span className="text-xs text-gray-500">{teacher.subject}</span>
-              </button>
+          <div className="space-y-8 animate-in fade-in">
+            {Object.keys(groupedTeachers).sort().map((groupName) => (
+              <div key={groupName} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                    <h3 className="font-bold text-gray-800 text-lg flex items-center">
+                        <Users className="w-5 h-5 mr-2 text-indigo-600" />
+                        {groupName}
+                    </h3>
+                    <span className="bg-indigo-100 text-indigo-800 text-xs font-bold px-2.5 py-1 rounded-full">
+                        {groupedTeachers[groupName].length} người
+                    </span>
+                </div>
+                
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-white">
+                            <tr>
+                                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-16">STT</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Họ và tên Giáo viên</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Môn giảng dạy</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-100">
+                            {groupedTeachers[groupName].map((teacher, index) => (
+                                <tr 
+                                    key={teacher.name} 
+                                    onClick={() => setSelectedTeacher(teacher.name)}
+                                    className="hover:bg-indigo-50 cursor-pointer transition-colors"
+                                >
+                                    <td className="px-4 py-3 text-sm text-gray-500 text-center font-medium">{index + 1}</td>
+                                    <td className="px-4 py-3 text-sm font-semibold text-indigo-700">{teacher.name}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-600">{teacher.subject}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+              </div>
             ))}
+            
             {filteredTeachers.length === 0 && (
-              <div className="col-span-full text-center py-8 text-gray-500">
-                Không tìm thấy giáo viên nào phù hợp với điều kiện lọc.
+              <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                Không tìm thấy giáo viên nào phù hợp với bộ lọc hiện tại.
               </div>
             )}
           </div>
         )}
 
+        {/* XEM CHI TIẾT TKB */}
         {selectedTeacher && (
-          <div>
+          <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-indigo-700">TKB: {selectedTeacher}</h3>
               <button 
                 onClick={() => setSelectedTeacher(null)}
-                className="text-sm text-gray-600 hover:text-indigo-600 underline"
+                className="text-sm text-white bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors font-medium"
               >
                 ← Trở lại danh sách
               </button>

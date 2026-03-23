@@ -52,13 +52,11 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   
   const [exportDate, setExportDate] = useState(() => getDefaultDateString());
 
-  // --- LOGIC TẠO ẢNH MỚI THEO Ý TƯỞNG CỦA THẦY ---
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
-  // Nếu người dùng thay đổi dữ liệu hoặc tiêu đề, xóa ảnh cũ đi để bắt tạo lại
   useEffect(() => {
     setGeneratedBlob(null);
     setCopySuccess(false);
@@ -180,36 +178,38 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     setSubNotes('');
   };
 
-  // 1. Hàm vẽ ảnh lưu vào bộ nhớ (Tách riêng)
-  const handleGenerateImage = async () => {
+  const handleGenerateImage = () => {
     if (!printRef.current) return;
     setIsGenerating(true);
     
-    try {
-      const canvas = await html2canvas(printRef.current, {
-        backgroundColor: '#ffffff',
-        scale: 2, 
-        useCORS: true,
-        logging: false
-      });
+    // Dùng setTimeout để React cập nhật nút "Đang xử lý..." trước khi html2canvas khóa luồng
+    setTimeout(async () => {
+      try {
+        const canvas = await html2canvas(printRef.current as HTMLElement, {
+          backgroundColor: '#ffffff',
+          scale: 2, 
+          useCORS: true,
+          allowTaint: true,
+          logging: false
+        });
 
-      canvas.toBlob((blob) => {
-        if (blob) {
-          setGeneratedBlob(blob);
-        } else {
-          alert('Lỗi tạo ảnh nội bộ.');
-        }
+        canvas.toBlob((blob) => {
+          if (blob) {
+            setGeneratedBlob(blob);
+          } else {
+            alert('Lỗi tạo ảnh: Blob rỗng.');
+          }
+          setIsGenerating(false);
+        }, 'image/png');
+
+      } catch (error) {
+        console.error('Lỗi khi vẽ ảnh:', error);
+        alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
         setIsGenerating(false);
-      }, 'image/png');
-
-    } catch (error) {
-      console.error('Lỗi khi vẽ ảnh:', error);
-      alert('Có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại.');
-      setIsGenerating(false);
-    }
+      }
+    }, 150);
   };
 
-  // 2. Hàm copy ngay lập tức (Vì ảnh đã có sẵn)
   const handleCopyReadyImage = async () => {
     if (!generatedBlob) return;
     
@@ -221,11 +221,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       setTimeout(() => setCopySuccess(false), 3000);
     } catch (error) {
       console.error('Lỗi clipboard:', error);
-      alert('Trình duyệt không hỗ trợ Copy. Vui lòng bấm nút Tải Ảnh bên cạnh!');
+      alert('Trình duyệt bảo mật không hỗ trợ Copy. Vui lòng bấm nút Tải Ảnh bên cạnh!');
     }
   };
 
-  // 3. Hàm tải ảnh (Dành cho ai thích tải file)
   const handleDownloadReadyImage = () => {
     if (!generatedBlob) return;
     const url = URL.createObjectURL(generatedBlob);
@@ -233,7 +232,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     link.download = `DayThay_${exportDate.replace(/ /g, '_')}.png`;
     link.href = url;
     link.click();
-    URL.revokeObjectURL(url); // Dọn dẹp bộ nhớ
+    URL.revokeObjectURL(url);
   };
 
   const renderMiniSchedule = (teacherName: string, activeSlot: any) => {
@@ -438,68 +437,68 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
              </div>
            </div>
            
-           {/* Khu vực chụp ảnh/In ấn */}
-           <div ref={printRef} className="bg-white p-6 print:p-0 rounded-xl relative">
-             {/* Lớp phủ mờ khi đang tạo ảnh */}
+           <div className="relative">
              {isGenerating && (
-                <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] z-10 flex justify-center items-center rounded-xl">
-                </div>
+                <div className="absolute inset-0 bg-white/60 z-10 rounded-xl"></div>
              )}
-
-             <div className="text-center mb-8">
-               <input 
-                 type="text" 
-                 value={exportTitle} 
-                 onChange={e => setExportTitle(e.target.value)} 
-                 className="text-2xl font-bold text-center w-full border-none focus:ring-0 print:p-0 uppercase bg-transparent text-gray-900" 
-               />
-               <input 
-                 type="text" 
-                 value={exportDate} 
-                 onChange={e => setExportDate(e.target.value)} 
-                 placeholder="Nhập ngày tháng năm (VD: Ngày 20 tháng 10 năm 2023)" 
-                 className="text-center w-full border-none focus:ring-0 text-gray-600 mt-2 print:p-0 italic bg-transparent" 
-               />
-             </div>
-      
-             <table className="w-full border-collapse border border-gray-800 text-sm">
-               <thead>
-                 <tr className="bg-gray-100">
-                   <th className="border border-gray-800 p-2">STT</th>
-                   <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
-                   <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
-                   <th className="border border-gray-800 p-2">Lớp</th>
-                   <th className="border border-gray-800 p-2">Thứ</th>
-                   <th className="border border-gray-800 p-2">Buổi</th>
-                   <th className="border border-gray-800 p-2">Tiết</th>
-                   <th className="border border-gray-800 p-2">Môn</th>
-                   <th className="border border-gray-800 p-2">Ghi chú</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 {Object.values(assignments).length === 0 ? (
-                   <tr>
-                     <td colSpan={9} className="border border-gray-800 p-4 text-center text-gray-500 italic">
-                       Chưa có dữ liệu phân công dạy thay.
-                     </td>
+             
+             {/* VÙNG ĐƯỢC CHỤP ẢNH */}
+             <div ref={printRef} className="bg-white p-6 print:p-0 rounded-xl">
+               <div className="text-center mb-8">
+                 <input 
+                   type="text" 
+                   value={exportTitle} 
+                   onChange={e => setExportTitle(e.target.value)} 
+                   className="text-2xl font-bold text-center w-full border-none focus:ring-0 print:p-0 uppercase bg-transparent text-gray-900" 
+                 />
+                 <input 
+                   type="text" 
+                   value={exportDate} 
+                   onChange={e => setExportDate(e.target.value)} 
+                   placeholder="Nhập ngày tháng năm (VD: Ngày 20 tháng 10 năm 2023)" 
+                   className="text-center w-full border-none focus:ring-0 text-gray-600 mt-2 print:p-0 italic bg-transparent" 
+                 />
+               </div>
+        
+               <table className="w-full border-collapse border border-gray-800 text-sm">
+                 <thead>
+                   <tr className="bg-gray-100">
+                     <th className="border border-gray-800 p-2">STT</th>
+                     <th className="border border-gray-800 p-2">Giáo viên nghỉ</th>
+                     <th className="border border-gray-800 p-2">Giáo viên dạy thay</th>
+                     <th className="border border-gray-800 p-2">Lớp</th>
+                     <th className="border border-gray-800 p-2">Thứ</th>
+                     <th className="border border-gray-800 p-2">Buổi</th>
+                     <th className="border border-gray-800 p-2">Tiết</th>
+                     <th className="border border-gray-800 p-2">Môn</th>
+                     <th className="border border-gray-800 p-2">Ghi chú</th>
                    </tr>
-                 ) : (
-                   (Object.values(assignments) as Assignment[]).map((a, idx) => (
-                     <tr key={a.id}>
-                       <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
-                       <td className="border border-gray-800 p-2 font-medium">{a.absentTeacher}</td>
-                       <td className="border border-gray-800 p-2 font-bold text-indigo-700">{a.substituteTeacher}</td>
-                       <td className="border border-gray-800 p-2 text-center font-medium">{a.className}</td>
-                       <td className="border border-gray-800 p-2 text-center">{a.day}</td>
-                       <td className="border border-gray-800 p-2 text-center">{a.session}</td>
-                       <td className="border border-gray-800 p-2 text-center">{a.period}</td>
-                       <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
-                       <td className="border border-gray-800 p-2">{a.notes}</td>
+                 </thead>
+                 <tbody>
+                   {Object.values(assignments).length === 0 ? (
+                     <tr>
+                       <td colSpan={9} className="border border-gray-800 p-4 text-center text-gray-500 italic">
+                         Chưa có dữ liệu phân công dạy thay.
+                       </td>
                      </tr>
-                   ))
-                 )}
-               </tbody>
-             </table>
+                   ) : (
+                     (Object.values(assignments) as Assignment[]).map((a, idx) => (
+                       <tr key={a.id}>
+                         <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
+                         <td className="border border-gray-800 p-2 font-medium">{a.absentTeacher}</td>
+                         <td className="border border-gray-800 p-2 font-bold text-indigo-700">{a.substituteTeacher}</td>
+                         <td className="border border-gray-800 p-2 text-center font-medium">{a.className}</td>
+                         <td className="border border-gray-800 p-2 text-center">{a.day}</td>
+                         <td className="border border-gray-800 p-2 text-center">{a.session}</td>
+                         <td className="border border-gray-800 p-2 text-center">{a.period}</td>
+                         <td className="border border-gray-800 p-2 text-center">{a.subject}</td>
+                         <td className="border border-gray-800 p-2">{a.notes}</td>
+                       </tr>
+                     ))
+                   )}
+                 </tbody>
+               </table>
+             </div>
            </div>
         </div>
       </div>

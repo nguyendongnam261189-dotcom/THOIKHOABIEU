@@ -12,7 +12,6 @@ const getDepartmentFromSheetName = (sheetName: string): string => {
   return 'Chung';
 };
 
-// CƠ CHẾ MỚI: Tự động suy luận Tổ chuyên môn dựa trên Môn học đang dạy
 const inferDepartmentFromSubject = (subject: string): string | null => {
   if (!subject) return null;
   const s = subject.toUpperCase();
@@ -69,9 +68,10 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             }
         });
 
-        // BƯỚC 2: TÌM MÔN HỌC
+        // BƯỚC 2: TÌM MÔN HỌC TỪ SHEET PCGD
         const knownSubjects = new Set<string>();
-        const pcgdSheetName = workbook.SheetNames.find(name => name.includes('PCGD'));
+        const pcgdSheetName = workbook.SheetNames.find(name => name.includes('PCGD') || name.toUpperCase().includes('PHÂN CÔNG'));
+        
         if (pcgdSheetName) {
           const worksheet = workbook.Sheets[pcgdSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
@@ -83,7 +83,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             const row = jsonData[i] || [];
             for (let c = 0; c < row.length; c++) {
               const cellStr = cleanString(row[c]).toLowerCase();
-              if (cellStr.includes('phân công chuyên môn') || cellStr.includes('phan cong chuyen mon')) {
+              if (cellStr.includes('phân công chuyên môn') || cellStr.includes('phan cong chuyen mon') || cellStr.includes('chuyên môn')) {
                 pccmColIdx = c;
                 headerRowIdx = i;
                 break;
@@ -111,12 +111,11 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         }
         
         ['Toán', 'Văn', 'Anh', 'AVăn', 'Lý', 'Hóa', 'Sinh', 'Sử', 'Địa', 'GDCD', 'Tin', 'CNghệ', 'Công nghệ', 'GDTC', 'Thể dục', 'Nghệ thuật', 'Âm nhạc', 'Mỹ thuật', 'KHTN', 'Lịch sử', 'Địa lý', 'HĐTNHN', 'CC-HĐTNHN', 'SHL', 'Chào cờ'].forEach(s => knownSubjects.add(s));
-        
         const sortedKnownSubjects = Array.from(knownSubjects).sort((a, b) => b.length - a.length);
 
-        // BƯỚC 3: QUÉT TOÀN BỘ FILE VÀ ÁP DỤNG LOGIC CỨU HỘ
+        // BƯỚC 3: QUÉT TOÀN BỘ FILE EXCEL ĐỂ ĐỌC TKB
         workbook.SheetNames.forEach(sheetName => {
-          if (sheetName.includes('PCGD') || sheetName.includes('PHONGHOC') || sheetName.includes('PhongHoc')) {
+          if (sheetName.includes('PCGD') || sheetName.includes('PHONGHOC') || sheetName.includes('PhongHoc') || sheetName.toUpperCase().includes('PHÂN CÔNG')) {
              return;
           }
 
@@ -371,7 +370,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                           tiet: normalizedTiet,
                           lop: lop,
                           mon: mon,
-                          giao_vien: giao_vien, // Sẽ được chuẩn hóa ở Bước 5
+                          giao_vien: giao_vien, // Sẽ được chuẩn hóa ở Bước 4
                           phong: '',
                           buoi: finalBuoi
                         };
@@ -428,7 +427,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         });
 
         // ============================================================================
-        // BƯỚC 4: THUẬT TOÁN ĐỒNG BỘ TÊN ĐẦY ĐỦ TỪ MÔN HỌC (PCGD)
+        // BƯỚC 4: THUẬT TOÁN ĐỒNG BỘ TÊN ĐẦY ĐỦ TỪ MÔN HỌC (NÂNG CẤP)
         // ============================================================================
         const shortToFullName = new Map<string, string>();
         
@@ -440,7 +439,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             let pccmColIdx = -1;
             let headerRowIdx = -1;
             
-            // Xác định cột Họ Tên và Cột Phân công chuyên môn
+            // Tìm cột
             for (let i = 0; i < Math.min(15, jsonData.length); i++) {
                 const row = jsonData[i] || [];
                 for (let c = 0; c < row.length; c++) {
@@ -474,36 +473,35 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                 }
             }
             
-            // Xử lý đối chiếu cho từng Tên viết tắt
             allTeachersMap.forEach((teacher, shortName) => {
                 let finalName = shortName;
-                const shortNameParts = shortName.split(' ');
-                const shortFirstName = shortNameParts[0].toUpperCase();
+                const shortNameUpper = shortName.toUpperCase();
                 
-                // QUY TẮC ĐẶC BIỆT: "Nguyễn Thị Vân"
-                if (shortFirstName === 'VÂN' || shortName.toUpperCase() === 'VÂN H' || shortName.toUpperCase() === 'VÂN T') {
+                // QUY TẮC ĐẶC BIỆT: Nguyễn Thị Vân
+                if (shortNameUpper.includes('VÂN') && !shortNameUpper.includes('VĂN')) {
                     if (teacher.group === 'Toán - Tin' || teacher.subject.toLowerCase().includes('toán') || teacher.subject.toLowerCase().includes('tin')) {
                         shortToFullName.set(shortName, 'Nguyễn Thị Vân (T)');
-                        return; // Kết thúc sớm cho trường hợp này
+                        return; 
                     } else if (teacher.group === 'Ngoại ngữ' || teacher.subject.toLowerCase().includes('anh')) {
                         shortToFullName.set(shortName, 'Nguyễn Thị Vân');
                         return;
                     }
                 }
                 
-                // Tránh lỗi gán nhầm nếu vốn đã ghi đủ tên (>= 3 chữ)
-                if (shortNameParts.length >= 3) {
+                // Bỏ qua nếu tên dài sẵn
+                if (shortName.split(' ').length >= 3 && shortName.length > 10) {
                     shortToFullName.set(shortName, shortName);
                     return;
                 }
 
-                // Tìm những giáo viên có chữ cuối trong PCGD khớp với Tên chính viết tắt
-                const matches = pcgdTeachers.filter(fn => fn.firstName === shortFirstName);
+                // CƠ CHẾ TÌM KIẾM BAO HÀM: Tên chính trong PCGD phải nằm lọt trong tên viết tắt
+                // Ví dụ: "DIỄMV".includes("DIỄM") => true. "NG OANH".includes("OANH") => true.
+                const matches = pcgdTeachers.filter(fn => shortNameUpper.includes(fn.firstName));
                 
                 if (matches.length === 1) {
-                    finalName = matches[0].original; // Chỉ có 1 người khớp tên -> Nhận luôn
+                    finalName = matches[0].original; 
                 } else if (matches.length > 1) {
-                    // CÓ NHIỀU NGƯỜI TRÙNG TÊN: Đem Môn học ra chấm điểm
+                    // Chấm điểm nếu trùng tên chính
                     let bestMatch = matches[0];
                     let maxScore = -1;
                     const tSubjects = teacher.subject.toLowerCase();
@@ -512,7 +510,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                         let score = 0;
                         const pccm = cand.pccm;
                         
-                        // Chấm điểm mức độ khớp Môn học (Phân công chuyên môn)
+                        // Chấm điểm môn học
                         if (tSubjects.includes('toán') && pccm.includes('toán')) score += 2;
                         if (tSubjects.includes('văn') && pccm.includes('văn')) score += 2;
                         if (tSubjects.includes('anh') && pccm.includes('anh')) score += 2;
@@ -529,24 +527,25 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                         if (tSubjects.includes('mỹ thuật') && (pccm.includes('mỹ thuật') || pccm.includes('mt'))) score += 2;
                         if (tSubjects.includes('khtn') && pccm.includes('khtn')) score += 2;
 
-                        // Chấm điểm phụ: Ký tự đi kèm (Ví dụ chữ H trong "Vân H", chữ TD trong "Thương TD")
-                        if (shortNameParts.length > 1) {
-                            const suffix = shortNameParts[1].toUpperCase();
-                            const candParts = cand.original.toUpperCase().split(' ');
-                            if (candParts.some(p => p.startsWith(suffix) || suffix.startsWith(p.charAt(0)))) {
-                                score += 1;
+                        // Chấm điểm phụ dựa trên các chữ cái thừa (ví dụ chữ "V" trong "DiễmV" hoặc "Ng" trong "Ng Oanh")
+                        const remainingParts = shortNameUpper.replace(cand.firstName, '').trim().split(/[\s\.]+/);
+                        const candParts = cand.original.toUpperCase().split(' ');
+
+                        remainingParts.forEach(part => {
+                            if (part && part.length > 0) {
+                                if (candParts.some(p => p.startsWith(part) || p === part)) {
+                                    score += 1.5;
+                                }
                             }
-                        }
+                        });
                         
-                        // Cập nhật người chiến thắng
                         if (score > maxScore) {
                             maxScore = score;
                             bestMatch = cand;
                         }
                     });
                     
-                    // Nếu tìm được người khớp môn học, gán tên đầy đủ
-                    if (maxScore > 0) {
+                    if (maxScore >= 0) {
                         finalName = bestMatch.original;
                     }
                 }
@@ -556,7 +555,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         }
         
         // ============================================================================
-        // BƯỚC 5: ĐỔI TOÀN BỘ TÊN TRONG DATABASE (Cả Lịch dạy & Danh sách Giáo viên)
+        // BƯỚC 5: ĐỔI TOÀN BỘ TÊN TRONG DATABASE
         // ============================================================================
         const finalSchedules = Array.from(uniqueSchedules.values()).map(s => {
             const mappedName = shortToFullName.get(s.giao_vien) || s.giao_vien;
@@ -567,7 +566,6 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         Array.from(allTeachersMap.values()).forEach(t => {
             const mappedName = shortToFullName.get(t.name) || t.name;
             if (mergedTeachersMap.has(mappedName)) {
-                // Nếu vô tình trùng tên thì nối môn học lại với nhau
                 const existing = mergedTeachersMap.get(mappedName)!;
                 const subjects1 = existing.subject ? existing.subject.split(', ').map(s=>s.trim()) : [];
                 const subjects2 = t.subject ? t.subject.split(', ').map(s=>s.trim()) : [];

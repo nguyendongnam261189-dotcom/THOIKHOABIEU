@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Search, Filter, Calendar } from 'lucide-react';
+import { Search, Calendar } from 'lucide-react';
 
 export const TeacherView: React.FC = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -31,18 +31,21 @@ export const TeacherView: React.FC = () => {
   });
 
   const getScheduleForTeacher = (teacherName: string) => {
-    return schedules.filter(s => s.giao_vien === teacherName && (filterSession ? s.buoi === filterSession : true));
+    // Không cần lọc Sáng/Chiều ở đây nữa, vì bảng Grid sẽ tự động chỉ vẽ các dòng tương ứng
+    return schedules.filter(s => s.giao_vien === teacherName);
   };
 
   const renderScheduleGrid = (teacherSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
-    let periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-    // Lọc số dòng hiển thị dựa trên tuỳ chọn Sáng/Chiều
-    if (filterSession === 'Sáng') {
-      periods = [1, 2, 3, 4, 5];
-    } else if (filterSession === 'Chiều') {
-      periods = [6, 7, 8, 9, 10];
+    // LOGIC MỚI: Định nghĩa rõ ràng Tiết 1-5 cho từng buổi
+    let rowDefs: { tiet: number, buoi: 'Sáng' | 'Chiều' }[] = [];
+    
+    if (filterSession === 'Sáng' || filterSession === '') {
+      for (let i = 1; i <= 5; i++) rowDefs.push({ tiet: i, buoi: 'Sáng' });
+    }
+    if (filterSession === 'Chiều' || filterSession === '') {
+      for (let i = 1; i <= 5; i++) rowDefs.push({ tiet: i, buoi: 'Chiều' });
     }
 
     return (
@@ -59,18 +62,17 @@ export const TeacherView: React.FC = () => {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {periods.map(period => (
-              <tr key={period} className={period === 5 && filterSession === '' ? 'border-b-4 border-gray-300' : ''}>
+            {rowDefs.map((row) => (
+              <tr key={`${row.buoi}-${row.tiet}`} className={row.buoi === 'Sáng' && row.tiet === 5 && filterSession === '' ? 'border-b-4 border-gray-300' : ''}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 border-r bg-gray-50">
-                  Tiết {period} {period <= 5 ? '(Sáng)' : '(Chiều)'}
+                  Tiết {row.tiet} ({row.buoi})
                 </td>
                 {days.map(day => {
-                  const session = period <= 5 ? 'Sáng' : 'Chiều';
-                  const adjustedPeriod = period <= 5 ? period : period - 5;
-                  const slot = teacherSchedules.find(s => s.thu === day && s.tiet === adjustedPeriod && s.buoi === session);
+                  // Chỉ tìm đúng Tiết (1-5) và đúng Buổi (Sáng/Chiều)
+                  const slot = teacherSchedules.find(s => s.thu === day && s.tiet === row.tiet && s.buoi === row.buoi);
                   
                   return (
-                    <td key={`${day}-${period}`} className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r ${slot ? 'bg-indigo-50' : 'bg-gray-100/50'}`}>
+                    <td key={`${day}-${row.buoi}-${row.tiet}`} className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r ${slot ? 'bg-indigo-50' : 'bg-gray-100/50'}`}>
                       {slot ? (
                         <div className="flex flex-col items-center">
                           <span className="font-bold text-indigo-700">{slot.lop}</span>
@@ -127,7 +129,7 @@ export const TeacherView: React.FC = () => {
             onChange={(e) => setFilterGroup(e.target.value)}
           >
             <option value="">Tất cả tổ chuyên môn</option>
-            {Array.from(new Set(teachers.map(t => t.group))).map(grp => (
+            {Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).map(grp => (
               <option key={grp} value={grp}>{grp}</option>
             ))}
           </select>

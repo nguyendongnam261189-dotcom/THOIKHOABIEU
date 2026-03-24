@@ -50,9 +50,13 @@ export const UserManagement: React.FC = () => {
   }, []);
 
   const handleRoleChange = (uid: string, role: 'admin' | 'teacher' | 'ttcm') => {
-    setUsers(prevUsers => prevUsers.map(user => 
-      user.uid === uid ? { ...user, role } : user
-    ));
+    setUsers(prevUsers => prevUsers.map(user => {
+      // Nếu đổi thành admin thì tự động xóa department, ngược lại giữ nguyên
+      if (user.uid === uid) {
+        return { ...user, role, department: role === 'admin' ? null : user.department };
+      }
+      return user;
+    }));
   };
 
   const handleDepartmentChange = (uid: string, department: string) => {
@@ -77,6 +81,7 @@ export const UserManagement: React.FC = () => {
         const userRef = doc(db, 'users', user.uid);
         return updateDoc(userRef, {
           role: user.role,
+          // Đảm bảo lưu null nếu chưa chọn tổ thay vì để chuỗi rỗng
           department: user.department || null,
           status: user.status || 'approved'
         });
@@ -138,7 +143,7 @@ export const UserManagement: React.FC = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tên hiển thị</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trạng thái</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vai trò</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tổ chuyên môn (dành cho TTCM)</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tổ chuyên môn</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -171,7 +176,7 @@ export const UserManagement: React.FC = () => {
                       value={user.role}
                       onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
                       className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                      disabled={user.email === 'nguyendongnam261189@gmail.com'} // Prevent changing super admin
+                      disabled={user.email === 'nguyendongnam261189@gmail.com'} // Chống tự hạ quyền của sếp tổng
                     >
                       <option value="teacher">Giáo viên</option>
                       <option value="ttcm">Tổ trưởng CM</option>
@@ -182,8 +187,9 @@ export const UserManagement: React.FC = () => {
                     <select
                       value={user.department || ''}
                       onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                      disabled={user.role !== 'ttcm'}
+                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
+                      // SỬA Ở ĐÂY: Chỉ Admin mới bị khóa ô chọn Tổ, còn lại được chọn tất!
+                      disabled={user.role === 'admin'}
                     >
                       <option value="">-- Chọn tổ --</option>
                       {departments.map(dept => (

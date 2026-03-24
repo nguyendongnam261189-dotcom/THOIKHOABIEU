@@ -24,12 +24,12 @@ const inferDepartmentFromSubject = (subject: string): string | null => {
   return null;
 };
 
-// 🔥 HÀM CHUẨN HÓA LỚP: BIẾN "6.1" -> "6/1" VÀ XỬ LÝ CẢ CHUỖI GHÉP "6.1, 8.12" -> "6/1, 8/12"
+// 🔥 HÀM CHUẨN HÓA MẠNH: Biến TẤT CẢ dấu chấm thành gạch chéo
 const formatClassName = (className: any): string => {
   if (!className) return '';
   let str = String(className).trim();
-  // Regex này sẽ tìm tất cả các cặp Số.Số và thay bằng Số/Số trên toàn bộ chuỗi
-  return str.replace(/(\d+)\.(\d+)/g, '$1/$2').replace(/\s+/g, ' ');
+  // Quét sạch mọi dấu chấm và thay bằng dấu gạch chéo, loại bỏ khoảng trắng dư
+  return str.replace(/\./g, '/').replace(/\s+/g, '');
 };
 
 const cleanString = (str: any): string => {
@@ -200,9 +200,9 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                       const key = `${scheduleObj.thu}-${scheduleObj.buoi}-${scheduleObj.tiet}-${scheduleObj.giao_vien}-${scheduleObj.mon}`;
                       if (uniqueSchedules.has(key)) {
                         const existing = uniqueSchedules.get(key)!;
-                        const currentLops = existing.lop.split(', ').map(l => l.trim());
+                        const currentLops = existing.lop.split(',').map(l => l.trim());
                         if (!currentLops.includes(lopRaw)) {
-                          existing.lop = [...currentLops, lopRaw].join(', ');
+                          existing.lop = existing.lop ? `${existing.lop}, ${lopRaw}` : lopRaw;
                         }
                       } else {
                         uniqueSchedules.set(key, scheduleObj);
@@ -223,7 +223,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
         });
 
-        // 4. ĐỒNG BỘ TÊN (DẤU VÂN TAY)
+        // 4. ĐỒNG BỘ TÊN VÀ XUẤT DỮ LIỆU
         const shortToFullName = new Map<string, string>();
         if (pcgdSheetName) {
             const worksheet = workbook.Sheets[pcgdSheetName];
@@ -251,7 +251,6 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                     const cnStr = cnColIdx !== -1 ? cleanString(row[cnColIdx]) : '';
                     const combinedStr = pccmStr + ' ' + cnStr;
                     const classMatches = combinedStr.match(/\d{1,2}\s*[./]\s*\d{1,2}/g) || [];
-                    // So khớp vân tay: ép tất cả về chuẩn X/Y để so cho chuẩn
                     const pcgdClasses = new Set(classMatches.map(c => formatClassName(c))); 
                     pcgdTeachers.push({ fullName, uniqueName: fullName, firstName, classes: pcgdClasses, pccmStr: pccmStr.toUpperCase() });
                 }
@@ -293,14 +292,14 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             });
         }
         
-        // 🔥 5. KẾT XUẤT DỮ LIỆU: BƯỚC CUỐI CÙNG ĐẢM BẢO CHUẨN HÓA LỚP
+        // 🔥 5. KẾT XUẤT DỮ LIỆU: BƯỚC CHUẨN HÓA CUỐI CÙNG (Dứt điểm dấu chấm)
         const finalSchedules = Array.from(uniqueSchedules.values()).map(s => {
             const mappedName = shortToFullName.get(s.giao_vien) || s.giao_vien;
             return { 
                 ...s, 
                 giao_vien: mappedName,
-                // Bước ép kiểu cuối cùng cho mọi trường hợp (lớp đơn và lớp ghép)
-                lop: formatClassName(s.lop).replace(/,/g, ', ')
+                // Tách chuỗi ghép ra, format từng lớp rồi nối lại bằng dấu phẩy cách
+                lop: s.lop.split(',').map(item => formatClassName(item)).join(', ')
             };
         });
 

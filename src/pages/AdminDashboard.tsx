@@ -11,10 +11,7 @@ export const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [versionName, setVersionName] = useState(''); 
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
-  const [stats, setStats] = useState<{ schedules: number, teachers: number } | null>(null);
-  const [combinedClasses, setCombinedClasses] = useState<any[]>([]);
   
-  // 🔥 QUẢN LÝ PHIÊN BẢN & CẤU HÌNH TUẦN
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [versionConfigs, setVersionConfigs] = useState<any[]>([]);
@@ -43,7 +40,6 @@ export const AdminDashboard: React.FC = () => {
     loadData();
   }, []);
 
-  // Tổng hợp danh sách phiên bản kèm số tuần
   const versions = useMemo(() => {
     const names = Array.from(new Set(allSchedules.map(s => s.versionName || 'Không rõ'))).sort();
     return names.map(name => {
@@ -52,7 +48,6 @@ export const AdminDashboard: React.FC = () => {
     });
   }, [allSchedules, versionConfigs]);
 
-  // Lấy tất cả tên lớp duy nhất để chọn lớp Khuyết tật
   const allClassNames = useMemo(() => {
     const set = new Set<string>();
     allSchedules.forEach(s => {
@@ -100,7 +95,7 @@ export const AdminDashboard: React.FC = () => {
       await scheduleService.saveVersionWeeks(vName, weeks);
       loadData();
     } catch (error) {
-      alert("Không thể lưu số tuần. Vui lòng kiểm tra kết nối.");
+      alert("Không thể lưu số tuần.");
     }
   };
 
@@ -123,84 +118,106 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleDeleteVersion = async (vName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa toàn bộ dữ liệu của "${vName}"?`)) return;
+    if (!window.confirm(`Bạn có chắc muốn xóa "${vName}"?`)) return;
     setLoading(true);
     try {
       await scheduleService.deleteScheduleByVersion(vName);
       loadData();
     } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi khi xóa: ${error.message}` });
+      setStatus({ type: 'error', message: `Lỗi: ${error.message}` });
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔥 HÀM XUẤT BÁO CÁO ĐA TẦNG (Tổ - Trường)
+  // 🔥 HÀM XUẤT BÁO CÁO CẢI TIẾN: ĐỊNH DẠNG ĐẸP + MULTI-SHEETS
   const exportIntegratedReport = () => {
     const wb = XLSX.utils.book_new();
     const ktLopSet = new Set(selectedKTLops);
-    const schoolData: any[] = [];
+    const summaryData: any[] = [];
     const depts = Array.from(new Set(teachers.map(t => t.group || 'Chung'))).sort();
 
-    let grandTotalPeriods = 0;
+    let grandTotal = 0;
 
     depts.forEach(dept => {
       const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
       const rows: any[] = [];
       let deptTotal = 0;
 
-      deptTeachers.forEach(teacher => {
+      deptTeachers.forEach((teacher, idx) => {
         let teacherTotalKT = 0;
         let detailsArr: string[] = [];
+        let classesTaughtSet = new Set<string>();
 
         versions.forEach(v => {
           if (v.weeks <= 0) return;
-          const teacherVPeriods = allSchedules.filter(s => 
+          const vPeriods = allSchedules.filter(s => 
             s.versionName === v.name && 
             s.giao_vien === teacher.name && 
             s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
           );
           
-          if (teacherVPeriods.length > 0) {
-            const subTotal = teacherVPeriods.length * v.weeks;
+          if (vPeriods.length > 0) {
+            const subTotal = vPeriods.length * v.weeks;
             teacherTotalKT += subTotal;
-            detailsArr.push(`${v.name}: ${teacherVPeriods.length} tiết x ${v.weeks} tuần`);
+            const classCountMap: Record<string, number> = {};
+            vPeriods.forEach(p => {
+              p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
+                const cleanLop = ml.replace(/\./g, '/');
+                classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1;
+                classesTaughtSet.add(cleanLop);
+              });
+            });
+            const classDetailStr = Object.entries(classCountMap).map(([l, c]) => `${c} tiết lớp ${l}`).join(' + ');
+            detailsArr.push(`[${classDetailStr}] x ${v.weeks} tuần (${v.name})`);
           }
         });
 
         if (teacherTotalKT > 0) {
-          const row = {
+          rows.push({
+            'STT': rows.length + 1,
             'Họ và tên': teacher.name,
-            'Tổ chuyên môn': dept,
-            'Tổng tiết Khuyết tật': teacherTotalKT,
-            'Chi tiết tính toán': detailsArr.join(' | ')
-          };
-          rows.push(row);
-          schoolData.push(row);
+            'Lớp dạy': Array.from(classesTaughtSet).join(', '),
+            'Số tiết': teacherTotalKT,
+            'Diễn giải chi tiết': detailsArr.join(' + ') + ` = ${teacherTotalKT} tiết`
+          });
           deptTotal += teacherTotalKT;
         }
       });
 
       if (rows.length > 0) {
-        rows.push({}); 
-        rows.push({ 'Họ và tên': 'TỔNG CỘNG TỔ', 'Tổng tiết Khuyết tật': deptTotal });
-        const ws = XLSX.utils.json_to_sheet(rows);
-        XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 25)}`);
-        grandTotalPeriods += deptTotal;
+        // Thêm dòng tổng cộng tổ vào sheet tổ
+        rows.push({ 'STT': '', 'Họ và tên': 'TỔNG CỘNG TỔ', 'Lớp dạy': '', 'Số tiết': deptTotal, 'Diễn giải chi tiết': '' });
+        
+        const ws = XLSX.utils.json_to_sheet([]);
+        XLSX.utils.sheet_add_aoa(ws, [[`BÁO CÁO TIẾT DẠY LỚP KHUYẾT TẬT - TỔ: ${dept.toUpperCase()}`]], { origin: 'A1' });
+        XLSX.utils.sheet_add_json(ws, rows, { origin: 'A3' });
+
+        // Căn chỉnh độ rộng cột
+        ws['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 60 }];
+        XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`);
+        
+        // Lưu vào data tổng hợp
+        summaryData.push({ 'STT': summaryData.length + 1, 'Tổ chuyên môn': dept, 'Tổng số tiết': deptTotal });
+        grandTotal += deptTotal;
       }
     });
 
+    // TẠO SHEET TỔNG HỢP TOÀN TRƯỜNG (CHỈ CÓ TỔ)
     const summaryRows = [
-      { A: 'BÁO CÁO TỔNG HỢP TIẾT DẠY LỚP KHUYẾT TẬT', B: '' },
-      { A: 'Ngày xuất:', B: new Date().toLocaleDateString('vi-VN') },
-      { A: 'Tổng số tiết toàn trường:', B: grandTotalPeriods },
-      { A: '', B: '' }
+      ['BÁO CÁO TỔNG HỢP TIẾT DẠY LỚP KHUYẾT TẬT TOÀN TRƯỜNG'],
+      [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}`],
+      [],
+      ['STT', 'Tổ chuyên môn', 'Tổng số tiết']
     ];
-    const wsSummary = XLSX.utils.json_to_sheet(schoolData, { origin: 'A5' });
-    XLSX.utils.sheet_add_json(wsSummary, summaryRows, { skipHeader: true, origin: 'A1' });
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG');
+    summaryData.forEach(item => summaryRows.push([item.STT, item['Tổ chuyên môn'], item['Tổng số tiết']]));
+    summaryRows.push(['', 'TỔNG CỘNG TOÀN TRƯỜNG', grandTotal]);
 
-    XLSX.writeFile(wb, `Bao_Cao_Khuyet_Tat_Tong_Hop.xlsx`);
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+    wsSummary['!cols'] = [{ wch: 5 }, { wch: 40 }, { wch: 20 }];
+    XLSX.utils.book_insert_sheet(wb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG', 0);
+
+    XLSX.writeFile(wb, `Bao_Cao_Che_Do_Khuyet_Tat.xlsx`);
   };
 
   return (
@@ -248,10 +265,10 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. QUẢN LÝ PHIÊN BẢN & SỐ TUẦN */}
+      {/* 2. QUẢN LÝ PHIÊN BẢN */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-          <Save className="mr-2 text-amber-500" /> Quản lý Phiên bản & Số tuần áp dụng
+          <Save className="mr-2 text-amber-500" /> Quản lý Phiên bản & Số tuần dạy thực tế
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {versions.map(v => (
@@ -271,7 +288,7 @@ export const AdminDashboard: React.FC = () => {
                 <button onClick={() => handleDeleteVersion(v.name)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
               </div>
               <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-gray-100">
-                <span className="text-xs font-medium text-gray-500">Áp dụng trong:</span>
+                <span className="text-xs font-medium text-gray-500">Dạy trong:</span>
                 <input 
                   type="number" 
                   className="w-16 border-b-2 border-indigo-200 focus:border-indigo-500 outline-none text-center font-bold text-indigo-700" 
@@ -289,14 +306,14 @@ export const AdminDashboard: React.FC = () => {
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-emerald-200">
         <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-emerald-800 flex items-center">
-              <BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Chế độ Khuyết tật
+              <BarChart3 className="mr-2 text-emerald-600" /> Xuất báo cáo Chế độ Khuyết tật
             </h3>
             <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
                 Đã chọn {selectedKTLops.length} lớp
             </span>
         </div>
 
-        <p className="text-sm text-gray-600 mb-4 italic">Bấm chọn các lớp có học sinh khuyết tật bên dưới:</p>
+        <p className="text-sm text-gray-600 mb-4 italic">Bấm chọn các lớp có học sinh khuyết tật để tính toán:</p>
         <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl border border-gray-100">
           {allClassNames.map(lop => (
             <button
@@ -318,11 +335,11 @@ export const AdminDashboard: React.FC = () => {
           disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)}
           className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold flex items-center justify-center shadow-lg transition-all text-lg"
         >
-          <FileSpreadsheet className="mr-2 h-6 w-6" /> XUẤT BÁO CÁO TỔNG HỢP (MULTI-SHEETS)
+          <FileSpreadsheet className="mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO ĐỊNH DẠNG ĐẸP
         </button>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-500">
-            <div className="flex items-start"><CheckCircle className="w-3 h-3 mr-1 text-emerald-500 shrink-0 mt-0.5" /> File Excel gồm nhiều Sheets: Tổng hợp trường & riêng từng Tổ.</div>
-            <div className="flex items-start"><CheckCircle className="w-3 h-3 mr-1 text-emerald-500 shrink-0 mt-0.5" /> Tự động nhân số tiết với số tuần tương ứng từng phiên bản.</div>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] text-gray-500 uppercase font-bold tracking-wider">
+            <div className="flex items-start"><CheckCircle className="w-3 h-3 mr-2 text-emerald-500 shrink-0 mt-0.5" /> File Excel nhiều Sheets chuyên nghiệp</div>
+            <div className="flex items-start"><CheckCircle className="w-3 h-3 mr-2 text-emerald-500 shrink-0 mt-0.5" /> Sheet Tổng hợp toàn trường theo Tổ</div>
         </div>
       </div>
     </div>

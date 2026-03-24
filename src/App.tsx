@@ -57,22 +57,38 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Chống Google Translate tự động làm sai lệch chữ trên điện thoại Android
+  useEffect(() => {
+    document.documentElement.lang = "vi";
+    document.documentElement.setAttribute("translate", "no");
+    
+    let meta = document.querySelector('meta[name="google"]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.setAttribute('name', 'google');
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute('content', 'notranslate');
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
         try {
           const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+          
           if (userDoc.exists()) {
             const data = userDoc.data();
-            const dbRole = data.role;
-            setRole(currentUser.email === 'nguyendongnam261189@gmail.com' ? 'admin' : (dbRole as 'admin' | 'teacher' | 'ttcm'));
+            // LẤY 100% QUYỀN VÀ TRẠNG THÁI TỪ FIREBASE
+            setRole(data.role as 'admin' | 'teacher' | 'ttcm');
             setDepartment(data.department || null);
-            setStatus(data.status || 'approved');
+            setStatus(data.status || 'pending');
           } else {
-            setRole(currentUser.email === 'nguyendongnam261189@gmail.com' ? 'admin' : 'teacher');
+            // Lần đầu tiên đăng nhập chưa có record trong Database
+            setRole('teacher');
             setDepartment(null);
-            setStatus(currentUser.email === 'nguyendongnam261189@gmail.com' ? 'approved' : 'pending');
+            setStatus('pending');
           }
         } catch (error) {
           console.error("Error fetching user role:", error);
@@ -115,7 +131,7 @@ const App: React.FC = () => {
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
           
           <Route path="/" element={user ? <Layout role={role} /> : <Navigate to="/login" />}>
-            <Route index element={<TeacherView />} />
+            <Route index element={<TeacherView role={role} department={department} />} />
             <Route path="class" element={<ClassView />} />
             
             {/* Admin Routes */}

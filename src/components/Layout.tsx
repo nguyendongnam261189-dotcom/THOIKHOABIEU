@@ -1,16 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
+// Import thêm các hàm query thời gian thực của Firestore
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Calendar, Users, LogOut, Upload, Search } from 'lucide-react';
 
 export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
+  // State lưu số lượng tài khoản đang chờ duyệt
+  const [pendingCount, setPendingCount] = useState(0);
 
   const handleLogout = async () => {
     await signOut(auth);
     navigate('/login');
   };
+
+  // Lắng nghe dữ liệu thời gian thực từ Firebase (Chỉ dành cho Admin)
+  useEffect(() => {
+    if (role !== 'admin') return;
+
+    const q = query(collection(db, 'users'), where('status', '==', 'pending'));
+    
+    // onSnapshot sẽ tự động cập nhật mỗi khi có sự thay đổi dữ liệu
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setPendingCount(snapshot.docs.length);
+    });
+
+    return () => unsubscribe();
+  }, [role]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -28,8 +46,18 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
                     <Upload className="h-5 w-5 mr-2" />
                     Quản lý Dữ liệu
                   </Link>
-                  <Link to="/users" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                    <Users className="h-5 w-5 mr-2" />
+                  <Link to="/users" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500 relative">
+                    {/* Bọc icon bằng 1 div để gắn chấm đỏ */}
+                    <div className="relative mr-2">
+                      <Users className="h-5 w-5" />
+                      {/* CHẤM ĐỎ NHẤP NHÁY */}
+                      {pendingCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                        </span>
+                      )}
+                    </div>
                     Người dùng
                   </Link>
                 </>
@@ -64,13 +92,13 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8">
         <Outlet />
       </main>
 
       {/* Mobile Navigation Bar */}
       <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-gray-200 flex overflow-x-auto hide-scrollbar py-2 z-50 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
-        <div className="flex px-2 space-x-6 min-w-max mx-auto">
+        <div className="flex px-2 space-x-6 min-w-max mx-auto items-center">
           <Link to="/" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
             <Search className="h-5 w-5" />
             <span className="text-[10px] mt-1 font-medium">TKB GV</span>
@@ -86,7 +114,16 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
                 <span className="text-[10px] mt-1 font-medium">Dữ liệu</span>
               </Link>
               <Link to="/users" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-                <Users className="h-5 w-5" />
+                <div className="relative">
+                  <Users className="h-5 w-5" />
+                  {/* CHẤM ĐỎ NHẤP NHÁY TRÊN ĐIỆN THOẠI */}
+                  {pendingCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                    </span>
+                  )}
+                </div>
                 <span className="text-[10px] mt-1 font-medium">Tài khoản</span>
               </Link>
             </>

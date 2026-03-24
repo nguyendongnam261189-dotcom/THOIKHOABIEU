@@ -2,21 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [versionName, setVersionName] = useState(''); // 🔥 STATE TÊN PHIÊN BẢN
+  const [versionName, setVersionName] = useState(''); 
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
   const [stats, setStats] = useState<{ schedules: number, teachers: number } | null>(null);
   const [combinedClasses, setCombinedClasses] = useState<any[]>([]);
-  const [existingVersions, setExistingVersions] = useState<string[]>([]); // 🔥 DANH SÁCH PHIÊN BẢN ĐÃ CÓ
+  const [existingVersions, setExistingVersions] = useState<string[]>([]); 
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [versionToDelete, setVersionToDelete] = useState<string | null>(null);
+  
+  // 🔥 STATES CHO TÍNH NĂNG ĐỔI TÊN PHIÊN BẢN
+  const [editingVersion, setEditingVersion] = useState<string | null>(null);
+  const [newVersionName, setNewVersionName] = useState('');
 
-  // Tải danh sách các phiên bản TKB hiện có
   const fetchVersions = async () => {
     try {
       const schedules = await scheduleService.getAllSchedules();
@@ -35,7 +37,6 @@ export const AdminDashboard: React.FC = () => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
       setStatus(null);
-      // Gợi ý tên phiên bản từ tên file nếu chưa nhập
       if (!versionName) {
         setVersionName(e.target.files[0].name.replace(/\.[^/.]+$/, ""));
       }
@@ -53,8 +54,6 @@ export const AdminDashboard: React.FC = () => {
 
     try {
       const { schedules, teachers } = await parseExcelFile(file);
-      
-      // 🔥 GẮN TÊN PHIÊN BẢN VÀO TỪNG TIẾT DẠY
       const labeledSchedules = schedules.map(s => ({
         ...s,
         versionName: versionName.trim()
@@ -66,15 +65,36 @@ export const AdminDashboard: React.FC = () => {
       setStats({ schedules: labeledSchedules.length, teachers: teachers.length });
       
       await teacherService.saveTeachers(teachers);
-      await scheduleService.saveSchedules(labeledSchedules); // Lưu song song, không ghi đè
+      await scheduleService.saveSchedules(labeledSchedules); 
 
       setStatus({ type: 'success', message: `Đã cập nhật "${versionName}" thành công!` });
       setVersionName('');
       setFile(null);
-      fetchVersions(); // Cập nhật lại danh sách phiên bản
+      fetchVersions(); 
     } catch (error: any) {
       console.error(error);
       setStatus({ type: 'error', message: `Lỗi: ${error.message || 'Không thể xử lý dữ liệu.'}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 🔥 HÀM XỬ LÝ ĐỔI TÊN
+  const handleRenameVersion = async (oldName: string) => {
+    if (!newVersionName.trim() || newVersionName === oldName) {
+      setEditingVersion(null);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await scheduleService.renameVersion(oldName, newVersionName.trim());
+      setStatus({ type: 'success', message: `Đã đổi tên thành "${newVersionName}" thành công!` });
+      setEditingVersion(null);
+      setNewVersionName('');
+      fetchVersions();
+    } catch (error: any) {
+      setStatus({ type: 'error', message: `Lỗi khi đổi tên: ${error.message}` });
     } finally {
       setLoading(false);
     }
@@ -86,7 +106,7 @@ export const AdminDashboard: React.FC = () => {
     setLoading(true);
     try {
       await scheduleService.deleteScheduleByVersion(vName);
-      setStatus({ type: 'success', message: ` Đã xóa phiên bản: ${vName}` });
+      setStatus({ type: 'success', message: `Đã xóa phiên bản: ${vName}` });
       fetchVersions();
     } catch (error: any) {
       setStatus({ type: 'error', message: `Lỗi khi xóa: ${error.message}` });
@@ -111,7 +131,7 @@ export const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6 max-w-4xl mx-auto pb-10">
       <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
           <Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB Mới
@@ -166,9 +186,9 @@ export const AdminDashboard: React.FC = () => {
               Xóa sạch dữ liệu
             </button>
           ) : (
-            <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-md border border-red-200 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-md border border-red-200">
               <span className="text-sm text-red-800 font-bold px-2">Xóa sạch 100%?</span>
-              <button onClick={handleDeleteAll} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md shadow-sm hover:bg-red-700">Có</button>
+              <button onClick={handleDeleteAll} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700">Có</button>
               <button onClick={() => setShowDeleteConfirm(false)} className="px-3 py-1 bg-white text-gray-800 text-sm rounded-md border border-gray-300">Hủy</button>
             </div>
           )}
@@ -185,7 +205,6 @@ export const AdminDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* 🔥 KHU VỰC QUẢN LÝ CÁC PHIÊN BẢN ĐÃ TẢI */}
       <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
           <Tag className="mr-2 text-amber-500" /> Các phiên bản TKB hiện có
@@ -194,14 +213,41 @@ export const AdminDashboard: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {existingVersions.map(v => (
               <div key={v} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-indigo-300 transition-all group">
-                <span className="font-bold text-gray-700">{v}</span>
-                <button 
-                  onClick={() => handleDeleteVersion(v)}
-                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
-                  title="Xóa phiên bản này"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
+                <div className="flex-1 flex items-center">
+                  {editingVersion === v ? (
+                    <div className="flex items-center space-x-2 w-full pr-4">
+                      <input 
+                        autoFocus
+                        className="flex-1 px-2 py-1 border border-indigo-500 rounded text-sm font-bold"
+                        value={newVersionName}
+                        onChange={(e) => setNewVersionName(e.target.value)}
+                        placeholder="Nhập tên mới..."
+                      />
+                      <button onClick={() => handleRenameVersion(v)} className="p-1 text-green-600 hover:bg-green-100 rounded"><Check className="w-4 h-4" /></button>
+                      <button onClick={() => setEditingVersion(null)} className="p-1 text-red-600 hover:bg-red-100 rounded"><X className="w-4 h-4" /></button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className={`font-bold ${v === 'Không rõ' ? 'text-red-500 italic' : 'text-gray-700'}`}>{v}</span>
+                      <button 
+                        onClick={() => { setEditingVersion(v); setNewVersionName(v === 'Không rõ' ? '' : v); }}
+                        className="ml-3 p-1 text-gray-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+                
+                {editingVersion !== v && (
+                  <button 
+                    onClick={() => handleDeleteVersion(v)}
+                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                    title="Xóa phiên bản này"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -210,7 +256,6 @@ export const AdminDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* Báo cáo lớp ghép giữ nguyên logic cũ */}
       {combinedClasses.length > 0 && status?.type === 'success' && (
         <div className="bg-amber-50 p-6 rounded-xl border border-amber-200">
           <h3 className="text-lg font-bold text-amber-900 mb-2 flex items-center">

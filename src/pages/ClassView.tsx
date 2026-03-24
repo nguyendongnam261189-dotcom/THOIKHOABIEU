@@ -1,50 +1,67 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule } from '../types';
 import { scheduleService } from '../services/scheduleService';
-import { Search, Calendar } from 'lucide-react';
+import { Search, Calendar, Layers } from 'lucide-react';
 
 export const ClassView: React.FC = () => {
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [classes, setClasses] = useState<string[]>([]);
+  const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [searchClass, setSearchClass] = useState('');
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [filterSession, setFilterSession] = useState('');
 
+  // 🔥 STATES CHO ĐA PHIÊN BẢN
+  const [versions, setVersions] = useState<string[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<string>('');
+
   useEffect(() => {
     const fetchData = async () => {
-      const allSchedules = await scheduleService.getAllSchedules();
-      setSchedules(allSchedules);
+      const schedulesData = await scheduleService.getAllSchedules();
+      setAllSchedules(schedulesData);
       
-      const classSet = new Set<string>();
-      allSchedules.forEach(s => {
-        if (s.lop) {
-          s.lop.split(', ').forEach(c => classSet.add(c.trim()));
-        }
-      });
-      const uniqueClasses = Array.from(classSet).filter(Boolean).sort();
-      setClasses(uniqueClasses);
+      // 🔥 TRÍCH XUẤT DANH SÁCH PHIÊN BẢN TỪ DỮ LIỆU
+      const uniqueVersions = Array.from(new Set(schedulesData.map(s => s.versionName || 'Mặc định'))).sort().reverse();
+      setVersions(uniqueVersions);
+      
+      if (uniqueVersions.length > 0 && !selectedVersion) {
+        setSelectedVersion(uniqueVersions[0]); // Mặc định chọn bản mới nhất
+      }
     };
     fetchData();
   }, []);
+
+  // 🔥 LỌC LỊCH DẠY THEO PHIÊN BẢN ĐÃ CHỌN
+  const currentSchedules = useMemo(() => {
+    return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
+  }, [allSchedules, selectedVersion]);
+
+  // 🔥 LẤY DANH SÁCH LỚP TỪ PHIÊN BẢN ĐANG CHỌN
+  const classes = useMemo(() => {
+    const classSet = new Set<string>();
+    currentSchedules.forEach(s => {
+      if (s.lop) {
+        s.lop.split(', ').forEach(c => classSet.add(c.trim()));
+      }
+    });
+    return Array.from(classSet).filter(Boolean).sort();
+  }, [currentSchedules]);
 
   const filteredClasses = classes.filter(c => 
     c.toLowerCase().includes(searchClass.toLowerCase())
   );
 
   const getScheduleForClass = (className: string) => {
-    return schedules.filter(s => s.lop.split(', ').map(c => c.trim()).includes(className) && (filterSession ? s.buoi === filterSession : true));
+    return currentSchedules.filter(s => 
+      s.lop.split(', ').map(c => c.trim()).includes(className) && 
+      (filterSession ? s.buoi === filterSession : true)
+    );
   };
 
   const renderScheduleGrid = (classSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
     let periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-    // Lọc số dòng hiển thị dựa trên tuỳ chọn Sáng/Chiều
-    if (filterSession === 'Sáng') {
-      periods = [1, 2, 3, 4, 5];
-    } else if (filterSession === 'Chiều') {
-      periods = [6, 7, 8, 9, 10];
-    }
+    if (filterSession === 'Sáng') periods = [1, 2, 3, 4, 5];
+    else if (filterSession === 'Chiều') periods = [6, 7, 8, 9, 10];
 
     return (
       <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-gray-200">
@@ -53,9 +70,7 @@ export const ClassView: React.FC = () => {
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Tiết \ Thứ</th>
               {days.map(day => (
-                <th key={day} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-r">
-                  Thứ {day}
-                </th>
+                <th key={day} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Thứ {day}</th>
               ))}
             </tr>
           </thead>
@@ -69,8 +84,6 @@ export const ClassView: React.FC = () => {
                   const session = period <= 5 ? 'Sáng' : 'Chiều';
                   const adjustedPeriod = period <= 5 ? period : period - 5;
                   const slot = classSchedules.find(s => s.thu === day && s.tiet === adjustedPeriod && s.buoi === session);
-                  
-                  // 🔥 LOGIC DIỆT CHỮ P MỚI: Cạo sạch khoảng trắng, ép về chữ thường để so sánh
                   const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
                   const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
 
@@ -80,12 +93,9 @@ export const ClassView: React.FC = () => {
                         <div className="flex flex-col items-center">
                           <span className="font-bold text-emerald-700">{slot.mon}</span>
                           <span className="text-xs text-gray-600">{slot.giao_vien}</span>
-                          {/* 🔥 CHỈ HIỆN P. KHI THẬT SỰ CÓ SỐ PHÒNG SAU KHI ĐÃ CẠO SẠCH KHOẢNG TRẮNG */}
                           {hasRoom && <span className="text-xs text-gray-500">P.{cleanPhong}</span>}
                         </div>
-                      ) : (
-                        <span className="text-gray-400 text-xs italic">Trống</span>
-                      )}
+                      ) : <span className="text-gray-400 text-xs italic">Trống</span>}
                     </td>
                   );
                 })}
@@ -100,9 +110,28 @@ export const ClassView: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-          <Calendar className="mr-2 text-emerald-600" /> Tra cứu TKB theo Lớp
-        </h2>
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center mb-6 border-b pb-4 border-gray-100 gap-4">
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+            <Calendar className="mr-2 text-emerald-600" /> Tra cứu TKB theo Lớp
+          </h2>
+
+          {/* 🔥 BỘ CHỌN PHIÊN BẢN TKB */}
+          <div className="flex items-center bg-emerald-50 p-2 rounded-xl border border-emerald-100 shadow-sm">
+            <span className="text-emerald-700 font-bold text-sm mr-3 flex items-center shrink-0">
+              Phiên bản:
+            </span>
+            <select 
+              className="bg-white border-none rounded-lg text-sm font-bold text-gray-800 focus:ring-2 focus:ring-emerald-500 py-1.5 px-3 min-w-[150px]"
+              value={selectedVersion}
+              onChange={(e) => {
+                setSelectedVersion(e.target.value);
+                setSelectedClass(null); // Reset khi đổi phiên bản
+              }}
+            >
+              {versions.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="relative">
@@ -110,7 +139,7 @@ export const ClassView: React.FC = () => {
             <input
               type="text"
               placeholder="Tìm tên lớp..."
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
               value={searchClass}
               onChange={(e) => setSearchClass(e.target.value)}
             />
@@ -127,7 +156,6 @@ export const ClassView: React.FC = () => {
           </select>
         </div>
 
-        {/* Class Selection List */}
         {!selectedClass && (
           <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-3">
             {filteredClasses.map(className => (
@@ -139,14 +167,18 @@ export const ClassView: React.FC = () => {
                 {className}
               </button>
             ))}
+            {filteredClasses.length === 0 && (
+              <div className="col-span-full text-center py-8 text-gray-500 italic">
+                Không có dữ liệu lớp học cho phiên bản này.
+              </div>
+            )}
           </div>
         )}
 
-        {/* Selected Class Schedule */}
         {selectedClass && (
           <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-emerald-700">TKB Lớp: {selectedClass}</h3>
+              <h3 className="text-xl font-bold text-emerald-700">TKB Lớp: {selectedClass} ({selectedVersion})</h3>
               <button 
                 onClick={() => setSelectedClass(null)}
                 className="text-sm text-white bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors font-medium"

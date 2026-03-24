@@ -14,6 +14,8 @@ import { UserManagement } from './pages/UserManagement';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2, Clock, XCircle } from 'lucide-react';
 import { ZaloWarning } from './components/ZaloWarning';
+// THÊM DÒNG NÀY ĐỂ GỌI BẢNG THÔNG BÁO CÀI ĐẶT APP
+import { InstallPrompt } from './components/InstallPrompt'; 
 
 const PendingApproval = () => (
   <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
@@ -134,6 +136,9 @@ const App: React.FC = () => {
     <ErrorBoundary>
       {/* Gọi component chặn Zalo đã được import ở trên */}
       <ZaloWarning /> 
+      
+      {/* HIỂN THỊ BẢNG MỜI CÀI ĐẶT APP (Sẽ tự nổi lên sau 2s nếu dùng ĐTDĐ) */}
+      <InstallPrompt />
       
       <Router>
         <Routes>

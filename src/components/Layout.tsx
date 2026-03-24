@@ -3,21 +3,18 @@ import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Calendar, Users, LogOut, Upload, Search } from 'lucide-react';
+// 🔥 IMPORT THÊM ICON BarChart3 CHO DASHBOARD
+import { Calendar, Users, LogOut, Upload, Search, BarChart3 } from 'lucide-react';
 
-// 🔥 BỔ SUNG 'manager' VÀO KHAI BÁO KIỂU DỮ LIỆU
 export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
   const [pendingCount, setPendingCount] = useState(0);
 
-  // 🔥 SỬA LẠI HÀM ĐĂNG XUẤT ĐỂ TRỊ BỆNH "KẸT BỘ NHỚ" CỦA IOS PWA
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // Xóa toàn bộ bộ nhớ đệm của trình duyệt (trị bệnh của iOS)
       localStorage.clear(); 
       sessionStorage.clear();
-      // ÉP TẢI LẠI TRANG THẬT MẠNH TAY THAY VÌ CHUYỂN TRANG ẢO
       window.location.href = '/login'; 
     } catch (error) {
       console.error("Lỗi đăng xuất:", error);
@@ -41,7 +38,6 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
       <header className="bg-indigo-600 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            {/* SỰ KIỆN ONCLICK ĐỂ F5 TẢI LẠI TRANG CHỦ */}
             <div 
               className="flex items-center cursor-pointer hover:opacity-80 transition-opacity" 
               onClick={() => window.location.href = '/'}
@@ -52,6 +48,14 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
             </div>
             
             <nav className="hidden md:flex space-x-4">
+              {/* 🔥 MENU DASHBOARD CHO ADMIN VÀ MANAGER */}
+              {(role === 'admin' || role === 'manager') && (
+                <Link to="/dashboard" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
+                  <BarChart3 className="h-5 w-5 mr-2" />
+                  Thống kê
+                </Link>
+              )}
+
               {role === 'admin' && (
                 <>
                   <Link to="/admin" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
@@ -116,6 +120,15 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
             <Calendar className="h-5 w-5" />
             <span className="text-[10px] mt-1 font-medium">TKB Lớp</span>
           </Link>
+          
+          {/* 🔥 MENU DASHBOARD MOBILE CHO ADMIN VÀ MANAGER */}
+          {(role === 'admin' || role === 'manager') && (
+            <Link to="/dashboard" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
+              <BarChart3 className="h-5 w-5" />
+              <span className="text-[10px] mt-1 font-medium">Thống kê</span>
+            </Link>
+          )}
+
           {role === 'admin' && (
             <>
               <Link to="/admin" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">

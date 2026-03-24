@@ -28,28 +28,24 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 SỬA LẠI HÀM LƯU: LƯU THÊM MỚI, KHÔNG XÓA SẠCH DỮ LIỆU CŨ CỦA PHIÊN BẢN KHÁC
   async saveSchedules(schedules: Schedule[]): Promise<void> {
     try {
       const batch = writeBatch(db);
-      
-      // Không còn bước xóa sạch docs cũ ở đây để bảo toàn các phiên bản khác
-      // Chỉ thêm mới các schedules của phiên bản đang tải lên
       schedules.forEach(schedule => {
         const docRef = doc(collection(db, COLLECTION_NAME));
         batch.set(docRef, schedule);
       });
-
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }
   },
 
-  // 🔥 THÊM HÀM MỚI: XÓA THEO TÊN PHIÊN BẢN
   async deleteScheduleByVersion(versionName: string): Promise<void> {
     try {
-      const q = query(collection(db, COLLECTION_NAME), where('versionName', '==', versionName));
+      // Xử lý trường hợp phiên bản cũ không có trường versionName (Không rõ)
+      const targetName = versionName === 'Không rõ' ? null : versionName;
+      const q = query(collection(db, COLLECTION_NAME), where('versionName', '==', targetName));
       const snapshot = await getDocs(q);
       const batch = writeBatch(db);
       
@@ -60,6 +56,27 @@ export const scheduleService = {
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  // 🔥 HÀM MỚI: ĐỔI TÊN PHIÊN BẢN (Dùng để sửa lỗi "Không rõ")
+  async renameVersion(oldName: string, newName: string): Promise<void> {
+    try {
+      // Nếu là "Không rõ", ta tìm các tài liệu mà trường versionName không tồn tại hoặc null
+      const targetOldName = oldName === 'Không rõ' ? null : oldName;
+      const q = query(collection(db, COLLECTION_NAME), where('versionName', '==', targetOldName));
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+
+      snapshot.forEach((document) => {
+        const docRef = doc(db, COLLECTION_NAME, document.id);
+        batch.update(docRef, { versionName: newName });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
       throw error;
     }
   },

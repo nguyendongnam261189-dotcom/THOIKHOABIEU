@@ -2,13 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
-// Import thêm các hàm query thời gian thực của Firestore
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Calendar, Users, LogOut, Upload, Search } from 'lucide-react';
 
 export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
-  // State lưu số lượng tài khoản đang chờ duyệt
   const [pendingCount, setPendingCount] = useState(0);
 
   const handleLogout = async () => {
@@ -16,13 +14,11 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
     navigate('/login');
   };
 
-  // Lắng nghe dữ liệu thời gian thực từ Firebase (Chỉ dành cho Admin)
   useEffect(() => {
     if (role !== 'admin') return;
 
     const q = query(collection(db, 'users'), where('status', '==', 'pending'));
     
-    // onSnapshot sẽ tự động cập nhật mỗi khi có sự thay đổi dữ liệu
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPendingCount(snapshot.docs.length);
     });
@@ -35,10 +31,16 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
       <header className="bg-indigo-600 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center">
+            {/* THÊM SỰ KIỆN ONCLICK ĐỂ F5 TẢI LẠI TRANG CHỦ */}
+            <div 
+              className="flex items-center cursor-pointer hover:opacity-80 transition-opacity" 
+              onClick={() => window.location.href = '/'}
+              title="Về Trang chủ & Làm mới dữ liệu"
+            >
               <Calendar className="h-8 w-8 mr-3" />
               <span className="font-bold text-xl">TKB Manager</span>
             </div>
+            
             <nav className="hidden md:flex space-x-4">
               {role === 'admin' && (
                 <>
@@ -47,10 +49,8 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
                     Quản lý Dữ liệu
                   </Link>
                   <Link to="/users" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500 relative">
-                    {/* Bọc icon bằng 1 div để gắn chấm đỏ */}
                     <div className="relative mr-2">
                       <Users className="h-5 w-5" />
-                      {/* CHẤM ĐỎ NHẤP NHÁY */}
                       {pendingCount > 0 && (
                         <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -87,7 +87,6 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
                 Đăng xuất
               </button>
             </nav>
-            {/* Mobile menu button could go here */}
           </div>
         </div>
       </header>
@@ -116,7 +115,6 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
               <Link to="/users" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
                 <div className="relative">
                   <Users className="h-5 w-5" />
-                  {/* CHẤM ĐỎ NHẤP NHÁY TRÊN ĐIỆN THOẠI */}
                   {pendingCount > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>

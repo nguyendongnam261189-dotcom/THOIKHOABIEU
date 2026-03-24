@@ -41,40 +41,60 @@ export const scheduleService = {
     }
   },
 
+  // 🔥 SỬA LẠI: XÓA PHIÊN BẢN BẰNG CHIẾN THUẬT QUÉT TOÀN BỘ (ĐỂ TRỊ LỖI TRƯỜNG KHÔNG TỒN TẠI)
   async deleteScheduleByVersion(versionName: string): Promise<void> {
     try {
-      // Xử lý trường hợp phiên bản cũ không có trường versionName (Không rõ)
-      const targetName = versionName === 'Không rõ' ? null : versionName;
-      const q = query(collection(db, COLLECTION_NAME), where('versionName', '==', targetName));
-      const snapshot = await getDocs(q);
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
       const batch = writeBatch(db);
+      let count = 0;
       
-      snapshot.forEach(doc => {
-        batch.delete(doc.ref);
+      snapshot.forEach(document => {
+        const data = document.data();
+        // Nếu không có versionName thì coi là 'Không rõ'
+        const currentVName = data.versionName || 'Không rõ';
+        
+        if (currentVName === versionName) {
+          batch.delete(document.ref);
+          count++;
+        }
       });
       
-      await batch.commit();
+      if (count > 0) {
+        await batch.commit();
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
       throw error;
     }
   },
 
-  // 🔥 HÀM MỚI: ĐỔI TÊN PHIÊN BẢN (Dùng để sửa lỗi "Không rõ")
+  // 🔥 HÀM MỚI: ĐỔI TÊN PHIÊN BẢN (CHIẾN THUẬT QUÉT TOÀN BỘ ĐỂ TRỊ LỖI UNDEFINED)
   async renameVersion(oldName: string, newName: string): Promise<void> {
     try {
-      // Nếu là "Không rõ", ta tìm các tài liệu mà trường versionName không tồn tại hoặc null
-      const targetOldName = oldName === 'Không rõ' ? null : oldName;
-      const q = query(collection(db, COLLECTION_NAME), where('versionName', '==', targetOldName));
-      const snapshot = await getDocs(q);
+      // Lấy tất cả dữ liệu TKB không dùng query lọc (để tránh lỗi Firebase bỏ qua trường undefined)
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
       const batch = writeBatch(db);
+      let count = 0;
 
       snapshot.forEach((document) => {
-        const docRef = doc(db, COLLECTION_NAME, document.id);
-        batch.update(docRef, { versionName: newName });
+        const data = document.data();
+        // Logic kiểm tra: nếu không có trường versionName thì mặc định hiểu là 'Không rõ'
+        const currentVName = data.versionName || 'Không rõ';
+        
+        if (currentVName === oldName) {
+          const docRef = doc(db, COLLECTION_NAME, document.id);
+          // Ép Firebase ghi đè trường này (update sẽ tạo trường mới nếu chưa có)
+          batch.update(docRef, { versionName: newName });
+          count++;
+        }
       });
 
-      await batch.commit();
+      // Chỉ commit nếu tìm thấy dữ liệu cần sửa
+      if (count > 0) {
+        await batch.commit();
+      } else {
+        console.warn("Không tìm thấy dữ liệu nào khớp với tên phiên bản:", oldName);
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
       throw error;

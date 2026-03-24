@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Users, Save, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
+  // TẠO THÊM STATE ĐỂ LƯU BẢN GỐC (Dùng để so sánh xem ai bị thay đổi)
+  const [originalUsers, setOriginalUsers] = useState<User[]>([]);
+  
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
-  // Đã cập nhật lại danh sách tổ chuyên môn khớp với định dạng chuẩn từ file TKB
   const departments = [
     'Toán - Tin', 
     'KHTN và Công nghệ', 
@@ -31,7 +33,6 @@ export const UserManagement: React.FC = () => {
           ...doc.data()
         } as User));
         
-        // Sort users: pending first, then by email
         usersData.sort((a, b) => {
           if (a.status === 'pending' && b.status !== 'pending') return -1;
           if (a.status !== 'pending' && b.status === 'pending') return 1;
@@ -39,6 +40,8 @@ export const UserManagement: React.FC = () => {
         });
         
         setUsers(usersData);
+        // Lưu lại một bản sao chép y hệt bản gốc lúc mới tải về
+        setOriginalUsers(JSON.parse(JSON.stringify(usersData)));
       } catch (error) {
         console.error("Error fetching users:", error);
         setStatus({ type: 'error', message: 'Không thể tải danh sách người dùng.' });
@@ -51,7 +54,6 @@ export const UserManagement: React.FC = () => {
 
   const handleRoleChange = (uid: string, role: 'admin' | 'teacher' | 'ttcm') => {
     setUsers(prevUsers => prevUsers.map(user => {
-      // Nếu đổi thành admin thì tự động xóa department, ngược lại giữ nguyên
       if (user.uid === uid) {
         return { ...user, role, department: role === 'admin' ? null : user.department };
       }
@@ -75,20 +77,45 @@ export const UserManagement: React.FC = () => {
     setSaving(true);
     setStatus(null);
     try {
-      // In a real app, you'd track changes and only update modified users
-      // For simplicity, we update all users here
-      const updatePromises = users.map(user => {
-        const userRef = doc(db, 'users', user.uid);
-        return updateDoc(userRef, {
-          role: user.role,
-          // Đảm bảo lưu null nếu chưa chọn tổ thay vì để chuỗi rỗng
-          department: user.department || null,
-          status: user.status || 'approved'
-        });
+      // 1. TẠO GÓI HÀNG (BATCH) CỦA FIREBASE
+      const batch = writeBatch(db);
+      let changedCount = 0;
+
+      // 2. SO SÁNH: CHỈ TÌM NHỮNG NGƯỜI BỊ THAY ĐỔI
+      users.forEach(user => {
+        const originalUser = originalUsers.find(u => u.uid === user.uid);
+        
+        const isChanged = !originalUser || 
+                          originalUser.role !== user.role || 
+                          originalUser.department !== user.department || 
+                          originalUser.status !== user.status;
+
+        if (isChanged) {
+          const userRef = doc(db, 'users', user.uid);
+          // Đóng gói lệnh cập nhật vào Batch thay vì gửi luôn
+          batch.update(userRef, {
+            role: user.role,
+            department: user.department || null,
+            status: user.status || 'approved'
+          });
+          changedCount++;
+        }
       });
 
-      await Promise.all(updatePromises);
-      setStatus({ type: 'success', message: 'Đã lưu phân quyền thành công!' });
+      // 3. NẾU KHÔNG CÓ AI THAY ĐỔI THÌ BÁO LUÔN, KHÔNG CẦN GỌI LÊN MÁY CHỦ
+      if (changedCount === 0) {
+        setStatus({ type: 'success', message: 'Không có thay đổi nào mới cần lưu.' });
+        setSaving(false);
+        return;
+      }
+
+      // 4. GỬI 1 LẦN DUY NHẤT LÊN FIREBASE
+      await batch.commit();
+      
+      // Cập nhật lại bản gốc để dùng cho lần lưu tiếp theo
+      setOriginalUsers(JSON.parse(JSON.stringify(users)));
+      setStatus({ type: 'success', message: `Đã lưu thành công phân quyền cho ${changedCount} người dùng!` });
+      
     } catch (error: any) {
       console.error("Error updating users:", error);
       setStatus({ type: 'error', message: `Lỗi khi lưu: ${error.message}` });
@@ -147,58 +174,67 @@ export const UserManagement: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {users.map(user => (
-                <tr key={user.uid}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{user.email}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-500">{user.name || 'N/A'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.status || 'approved'}
-                      onChange={(e) => handleStatusChange(user.uid, e.target.value as any)}
-                      className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md ${
-                        user.status === 'pending' ? 'text-yellow-600 font-medium' : 
-                        user.status === 'rejected' ? 'text-red-600 font-medium' : 
-                        'text-green-600 font-medium'
-                      }`}
-                      disabled={user.email === 'nguyendongnam261189@gmail.com'}
-                    >
-                      <option value="pending">Chờ duyệt</option>
-                      <option value="approved">Đã duyệt</option>
-                      <option value="rejected">Từ chối</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.role}
-                      onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                      disabled={user.email === 'nguyendongnam261189@gmail.com'} // Chống tự hạ quyền của sếp tổng
-                    >
-                      <option value="teacher">Giáo viên</option>
-                      <option value="ttcm">Tổ trưởng CM</option>
-                      <option value="admin">Quản trị viên</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.department || ''}
-                      onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
-                      // SỬA Ở ĐÂY: Chỉ Admin mới bị khóa ô chọn Tổ, còn lại được chọn tất!
-                      disabled={user.role === 'admin'}
-                    >
-                      <option value="">-- Chọn tổ --</option>
-                      {departments.map(dept => (
-                        <option key={dept} value={dept}>{dept}</option>
-                      ))}
-                    </select>
-                  </td>
-                </tr>
-              ))}
+              {users.map(user => {
+                // Đánh dấu dòng nào bị thay đổi để Admin dễ nhìn
+                const originalUser = originalUsers.find(u => u.uid === user.uid);
+                const isChanged = originalUser && (
+                  originalUser.role !== user.role || 
+                  originalUser.department !== user.department || 
+                  originalUser.status !== user.status
+                );
+
+                return (
+                  <tr key={user.uid} className={isChanged ? "bg-yellow-50/50" : ""}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{user.email}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-500">{user.name || 'N/A'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={user.status || 'approved'}
+                        onChange={(e) => handleStatusChange(user.uid, e.target.value as any)}
+                        className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md ${
+                          user.status === 'pending' ? 'text-yellow-600 font-medium' : 
+                          user.status === 'rejected' ? 'text-red-600 font-medium' : 
+                          'text-green-600 font-medium'
+                        }`}
+                        disabled={user.email === 'nguyendongnam261189@gmail.com'}
+                      >
+                        <option value="pending">Chờ duyệt</option>
+                        <option value="approved">Đã duyệt</option>
+                        <option value="rejected">Từ chối</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={user.role}
+                        onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
+                        className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                        disabled={user.email === 'nguyendongnam261189@gmail.com'}
+                      >
+                        <option value="teacher">Giáo viên</option>
+                        <option value="ttcm">Tổ trưởng CM</option>
+                        <option value="admin">Quản trị viên</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={user.department || ''}
+                        onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
+                        className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
+                        disabled={user.role === 'admin'}
+                      >
+                        <option value="">-- Chọn tổ --</option>
+                        {departments.map(dept => (
+                          <option key={dept} value={dept}>{dept}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {users.length === 0 && (

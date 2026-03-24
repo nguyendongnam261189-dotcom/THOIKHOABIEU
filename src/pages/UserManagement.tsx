@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { User } from '../types';
+// IMPORT THÊM KIỂU DỮ LIỆU Teacher VÀ SERVICE
+import { User, Teacher } from '../types';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Users, Save, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { teacherService } from '../services/teacherService';
+
+// Mở rộng kiểu User để chứa thêm biến teacherName
+type ExtendedUser = User & { teacherName?: string | null };
 
 export const UserManagement: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<ExtendedUser[]>([]);
+  const [teachersList, setTeachersList] = useState<Teacher[]>([]); // STATE LƯU DANH SÁCH GIÁO VIÊN TỪ TKB
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
@@ -22,14 +28,15 @@ export const UserManagement: React.FC = () => {
   ];
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    const fetchData = async () => {
       setLoading(true);
       try {
+        // 1. TẢI DANH SÁCH NGƯỜI DÙNG
         const querySnapshot = await getDocs(collection(db, 'users'));
         const usersData = querySnapshot.docs.map(doc => ({
           uid: doc.id,
           ...doc.data()
-        } as User));
+        } as ExtendedUser));
         
         // Sort users: pending first, then by email
         usersData.sort((a, b) => {
@@ -39,26 +46,44 @@ export const UserManagement: React.FC = () => {
         });
         
         setUsers(usersData);
+
+        // 2. TẢI DANH SÁCH GIÁO VIÊN ĐỂ RÁP VÀO DROPDOWN CHỌN TÊN
+        const allTeachers = await teacherService.getAllTeachers();
+        setTeachersList(allTeachers);
+
       } catch (error) {
-        console.error("Error fetching users:", error);
-        setStatus({ type: 'error', message: 'Không thể tải danh sách người dùng.' });
+        console.error("Error fetching data:", error);
+        setStatus({ type: 'error', message: 'Không thể tải danh sách.' });
       } finally {
         setLoading(false);
       }
     };
-    fetchUsers();
+    fetchData();
   }, []);
 
   const handleRoleChange = (uid: string, role: 'admin' | 'teacher' | 'ttcm') => {
     setUsers(prevUsers => prevUsers.map(user => 
-      // XÓA TỔ NẾU ĐỔI THÀNH ADMIN ĐỂ TRÁNH LỖI DỮ LIỆU THỪA
-      user.uid === uid ? { ...user, role, department: role === 'admin' ? null : user.department } : user
+      // Xóa tổ và xóa liên kết tên nếu đổi thành admin
+      user.uid === uid ? { 
+        ...user, 
+        role, 
+        department: role === 'admin' ? null : user.department,
+        teacherName: role === 'admin' ? null : user.teacherName
+      } : user
     ));
   };
 
   const handleDepartmentChange = (uid: string, department: string) => {
     setUsers(prevUsers => prevUsers.map(user => 
-      user.uid === uid ? { ...user, department } : user
+      // XÓA LIÊN KẾT TÊN CŨ NẾU ADMIN ĐỔI TỔ KHÁC (BẮT CHỌN LẠI)
+      user.uid === uid ? { ...user, department, teacherName: null } : user
+    ));
+  };
+
+  // HÀM MỚI: XỬ LÝ KHI ADMIN CHỌN TÊN GIÁO VIÊN LIÊN KẾT
+  const handleTeacherLinkChange = (uid: string, teacherName: string) => {
+    setUsers(prevUsers => prevUsers.map(user => 
+      user.uid === uid ? { ...user, teacherName } : user
     ));
   };
 
@@ -72,20 +97,19 @@ export const UserManagement: React.FC = () => {
     setSaving(true);
     setStatus(null);
     try {
-      // In a real app, you'd track changes and only update modified users
-      // For simplicity, we update all users here
+      // Dùng nguyên bản vòng lặp map và Promise.all của thầy
       const updatePromises = users.map(user => {
         const userRef = doc(db, 'users', user.uid);
         return updateDoc(userRef, {
           role: user.role,
-          // LUÔN LƯU NULL NẾU RỖNG CHỨ KHÔNG ĐỂ UNDEFINED
           department: user.department || null,
+          teacherName: user.teacherName || null, // LƯU THÊM TRƯỜNG TÊN GIÁO VIÊN
           status: user.status || 'approved'
         });
       });
 
       await Promise.all(updatePromises);
-      setStatus({ type: 'success', message: 'Đã lưu phân quyền thành công!' });
+      setStatus({ type: 'success', message: 'Đã lưu phân quyền và liên kết thành công!' });
     } catch (error: any) {
       console.error("Error updating users:", error);
       setStatus({ type: 'error', message: `Lỗi khi lưu: ${error.message}` });
@@ -103,11 +127,11 @@ export const UserManagement: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-            <Users className="mr-2 text-indigo-600" /> Quản lý Người dùng & Phân quyền
+            <Users className="mr-2 text-indigo-600" /> Quản lý Người dùng & Liên kết TKB
           </h2>
           <button
             onClick={handleSave}
@@ -141,61 +165,83 @@ export const UserManagement: React.FC = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trạng thái</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vai trò</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tổ chuyên môn</th>
+                {/* THÊM CỘT TIÊU ĐỀ MỚI */}
+                <th className="px-6 py-3 text-left text-xs font-medium text-indigo-600 uppercase tracking-wider bg-indigo-50/50">Liên kết Tên trong TKB</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {users.map(user => (
-                <tr key={user.uid}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{user.email}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-500">{user.name || 'N/A'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.status || 'approved'}
-                      onChange={(e) => handleStatusChange(user.uid, e.target.value as any)}
-                      className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md ${
-                        user.status === 'pending' ? 'text-yellow-600 font-medium' : 
-                        user.status === 'rejected' ? 'text-red-600 font-medium' : 
-                        'text-green-600 font-medium'
-                      }`}
-                      disabled={user.email === 'nguyendongnam261189@gmail.com'}
-                    >
-                      <option value="pending">Chờ duyệt</option>
-                      <option value="approved">Đã duyệt</option>
-                      <option value="rejected">Từ chối</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.role}
-                      onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                      disabled={user.email === 'nguyendongnam261189@gmail.com'} // Prevent changing super admin
-                    >
-                      <option value="teacher">Giáo viên</option>
-                      <option value="ttcm">Tổ trưởng CM</option>
-                      <option value="admin">Quản trị viên</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={user.department || ''}
-                      onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
-                      // CHỈ KHÓA KHÔNG CHO CHỌN TỔ NẾU ĐANG LÀ ADMIN
-                      disabled={user.role === 'admin'}
-                    >
-                      <option value="">-- Chọn tổ --</option>
-                      {departments.map(dept => (
-                        <option key={dept} value={dept}>{dept}</option>
-                      ))}
-                    </select>
-                  </td>
-                </tr>
-              ))}
+              {users.map(user => {
+                // LỌC DANH SÁCH GIÁO VIÊN: Chỉ hiện những người thuộc đúng Tổ mà dòng này đang chọn
+                const availableTeachersInDept = teachersList
+                    .filter(t => t.group === user.department)
+                    .sort((a,b) => a.name.localeCompare(b.name, 'vi'));
+
+                return (
+                  <tr key={user.uid}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{user.email}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-500">{user.name || 'N/A'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={user.status || 'approved'}
+                        onChange={(e) => handleStatusChange(user.uid, e.target.value as any)}
+                        className={`block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md ${
+                          user.status === 'pending' ? 'text-yellow-600 font-medium' : 
+                          user.status === 'rejected' ? 'text-red-600 font-medium' : 
+                          'text-green-600 font-medium'
+                        }`}
+                        disabled={user.email === 'nguyendongnam261189@gmail.com'}
+                      >
+                        <option value="pending">Chờ duyệt</option>
+                        <option value="approved">Đã duyệt</option>
+                        <option value="rejected">Từ chối</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={user.role}
+                        onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
+                        className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                        disabled={user.email === 'nguyendongnam261189@gmail.com'}
+                      >
+                        <option value="teacher">Giáo viên</option>
+                        <option value="ttcm">Tổ trưởng CM</option>
+                        <option value="admin">Quản trị viên</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={user.department || ''}
+                        onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
+                        className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
+                        disabled={user.role === 'admin'}
+                      >
+                        <option value="">-- Chọn tổ --</option>
+                        {departments.map(dept => (
+                          <option key={dept} value={dept}>{dept}</option>
+                        ))}
+                      </select>
+                    </td>
+                    {/* CỘT CHỌN TÊN GIÁO VIÊN LIÊN KẾT */}
+                    <td className="px-6 py-4 whitespace-nowrap bg-indigo-50/10">
+                      <select
+                        value={user.teacherName || ''}
+                        onChange={(e) => handleTeacherLinkChange(user.uid, e.target.value)}
+                        className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
+                        disabled={user.role === 'admin' || !user.department}
+                      >
+                        <option value="">{user.department ? '-- Chọn tên GV --' : '-- Chọn Tổ trước --'}</option>
+                        {availableTeachersInDept.map(t => (
+                          <option key={t.name} value={t.name}>{t.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {users.length === 0 && (

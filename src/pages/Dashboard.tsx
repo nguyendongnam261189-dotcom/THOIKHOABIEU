@@ -2,17 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { LayoutDashboard, Users, Presentation, Building2, BarChart3, Loader2, Search, Filter, Radar, Clock, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Users, Presentation, Building2, BarChart3, Loader2, Search, Filter, Radar, Clock, AlertCircle, Layers } from 'lucide-react';
 
 // 🔥 TIẾP NHẬN PROPS ROLE VÀ DEPARTMENT ĐỂ PHÂN QUYỀN
 export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttcm' | null, department?: string | null }> = ({ role, department }) => {
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
 
   // States cho Tra cứu định mức
   const [searchName, setSearchName] = useState('');
   const [filterDept, setFilterDept] = useState('');
+
+  // 🔥 STATES CHO ĐA PHIÊN BẢN
+  const [versions, setVersions] = useState<string[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<string>('');
 
   // States cho Trạm Radar tìm giáo viên trống
   const [radarDay, setRadarDay] = useState<number>(new Date().getDay() + 1 > 7 ? 2 : new Date().getDay() + 1);
@@ -27,23 +31,27 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [allSchedules, allTeachers] = await Promise.all([
+        const [schedulesData, allTeachers] = await Promise.all([
           scheduleService.getAllSchedules(),
           teacherService.getAllTeachers()
         ]);
 
-        // 🔥 LOGIC PHÂN QUYỀN DỮ LIỆU
-        let allowedTeachers = allTeachers;
-        let allowedSchedules = allSchedules;
+        setAllSchedules(schedulesData);
 
-        if (role === 'ttcm' && !isOrphanTTCM) {
-          allowedTeachers = allTeachers.filter(t => t.group === department);
-          const allowedNames = new Set(allowedTeachers.map(t => t.name));
-          allowedSchedules = allSchedules.filter(s => allowedNames.has(s.giao_vien));
+        // 🔥 TRÍCH XUẤT DANH SÁCH PHIÊN BẢN
+        const uniqueVersions = Array.from(new Set(schedulesData.map(s => s.versionName || 'Mặc định'))).sort().reverse();
+        setVersions(uniqueVersions);
+        if (uniqueVersions.length > 0 && !selectedVersion) {
+          setSelectedVersion(uniqueVersions[0]);
         }
 
+        // PHÂN QUYỀN GIÁO VIÊN
+        let allowedTeachers = allTeachers;
+        if (role === 'ttcm' && !isOrphanTTCM) {
+          allowedTeachers = allTeachers.filter(t => t.group === department);
+        }
         setTeachers(allowedTeachers);
-        setSchedules(allowedSchedules);
+
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
@@ -52,6 +60,17 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     };
     fetchData();
   }, [role, department, isOrphanTTCM]);
+
+  // 🔥 LỌC LỊCH DẠY THEO PHIÊN BẢN VÀ QUYỀN HẠN
+  const schedules = useMemo(() => {
+    let filtered = allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
+    
+    if (role === 'ttcm' && !isOrphanTTCM) {
+      const allowedNames = new Set(teachers.map(t => t.name));
+      filtered = filtered.filter(s => allowedNames.has(s.giao_vien));
+    }
+    return filtered;
+  }, [allSchedules, selectedVersion, role, department, teachers, isOrphanTTCM]);
 
   // Tự động tạo danh sách tổ từ dữ liệu thực tế
   const dynamicDepartments = useMemo(() => {
@@ -88,7 +107,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   const freeTeachers = useMemo(() => {
     if (!baseStats) return [];
     
-    // Tìm những người bận tại đúng tiết đó (trong tập dữ liệu schedules đã được lọc theo quyền)
     const busyTeacherNames = new Set(
       schedules
         .filter(s => s.thu === radarDay && s.buoi === radarSession && s.tiet === radarPeriod)
@@ -131,11 +149,29 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 sticky top-0 z-10">
-        <h2 className="text-2xl font-bold text-gray-800 flex items-center mb-1">
-          <LayoutDashboard className="mr-2.5 text-indigo-600 h-7 w-7" /> 
-          {role === 'ttcm' ? `Thống kê Tổ: ${department}` : 'Trạm Chỉ Huy & Thống Kê'}
-        </h2>
-        <p className="text-sm text-gray-500 mt-1">Hỗ trợ {role === 'ttcm' ? 'quản lý định mức tổ' : 'điều phối nhân sự'} dựa trên TKB thực tế.</p>
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center mb-1">
+              <LayoutDashboard className="mr-2.5 text-indigo-600 h-7 w-7" /> 
+              {role === 'ttcm' ? `Thống kê Tổ: ${department}` : 'Trạm Chỉ Huy & Thống Kê'}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">Hỗ trợ {role === 'ttcm' ? 'quản lý định mức tổ' : 'điều phối nhân sự'} dựa trên TKB thực tế.</p>
+          </div>
+
+          {/* 🔥 BỘ CHỌN PHIÊN BẢN TKB CHO DASHBOARD */}
+          <div className="flex items-center bg-indigo-50 p-2 rounded-xl border border-indigo-100 shadow-sm self-start lg:self-center">
+            <span className="text-indigo-700 font-bold text-sm mr-3 flex items-center shrink-0">
+              <Layers className="w-4 h-4 mr-1.5" /> Phiên bản:
+            </span>
+            <select 
+              className="bg-white border-none rounded-lg text-sm font-bold text-gray-800 focus:ring-2 focus:ring-indigo-500 py-1.5 px-3 min-w-[150px]"
+              value={selectedVersion}
+              onChange={(e) => setSelectedVersion(e.target.value)}
+            >
+              {versions.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -178,13 +214,15 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
             <div className="w-8 text-center">STT</div><div className="flex-1 px-2">Họ tên</div><div className="w-16 text-right">Số tiết</div>
           </div>
           <div className="flex-1 overflow-y-auto border-x border-b border-gray-200 rounded-b-lg divide-y divide-gray-100">
-            {filteredTeacherLoads.map((t, index) => (
+            {filteredTeacherLoads.length > 0 ? filteredTeacherLoads.map((t, index) => (
               <div key={t.name} className="flex items-center px-4 py-3 hover:bg-indigo-50/50">
                 <div className="w-8 text-center text-sm text-gray-400">{index + 1}</div>
                 <div className="flex-1 px-2 font-bold text-indigo-900 text-sm">{t.name} <span className="block text-[10px] font-normal text-gray-500">{t.group}</span></div>
                 <div className="w-16 text-right"><span className={`px-2 py-1 rounded text-sm font-bold ${t.load === 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{t.load}</span></div>
               </div>
-            ))}
+            )) : (
+              <div className="text-center py-8 text-gray-500 italic text-sm">Không tìm thấy dữ liệu.</div>
+            )}
           </div>
         </div>
 
@@ -211,12 +249,14 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           </div>
           <div className="bg-emerald-600 px-4 py-2 rounded-t-lg flex text-xs font-bold text-white uppercase"><div className="flex-1">GV Khả dụng ({freeTeachers.length})</div><div className="w-16 text-right">Tổng tiết</div></div>
           <div className="flex-1 overflow-y-auto border-x border-b border-emerald-200 rounded-b-lg divide-y divide-emerald-50">
-            {freeTeachers.map((t) => (
+            {freeTeachers.length > 0 ? freeTeachers.map((t) => (
               <div key={t.name} className="flex items-center justify-between px-4 py-3 hover:bg-emerald-50">
                 <div><div className="font-bold text-gray-800 text-sm">{t.name}</div><div className="text-[10px] text-gray-500">{t.group}</div></div>
                 <div className="flex items-center text-emerald-700 font-bold bg-emerald-100 px-2 py-1 rounded text-sm"><Clock className="w-3 h-3 mr-1" />{t.load}</div>
               </div>
-            ))}
+            )) : (
+              <div className="text-center py-8 text-emerald-600 italic text-sm">Tất cả giáo viên đều bận tiết này.</div>
+            )}
           </div>
         </div>
       </div>

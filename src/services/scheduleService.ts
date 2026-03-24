@@ -1,9 +1,10 @@
-import { collection, doc, getDocs, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, writeBatch, query, where, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Schedule, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'schedules';
+const CONFIG_COLLECTION = 'version_configs'; // 🔥 Collection mới để lưu số tuần
 
 export const scheduleService = {
   async getAllSchedules(): Promise<Schedule[]> {
@@ -41,7 +42,32 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 SỬA LẠI: XÓA PHIÊN BẢN BẰNG CHIẾN THUẬT QUÉT TOÀN BỘ (ĐỂ TRỊ LỖI TRƯỜNG KHÔNG TỒN TẠI)
+  // 🔥 HÀM MỚI 1: LƯU SỐ TUẦN ÁP DỤNG CHO PHIÊN BẢN
+  async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
+    try {
+      const docRef = doc(db, CONFIG_COLLECTION, versionName);
+      await setDoc(docRef, {
+        versionName,
+        appliedWeeks: weeks,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, CONFIG_COLLECTION);
+      throw error;
+    }
+  },
+
+  // 🔥 HÀM MỚI 2: LẤY TẤT CẢ CẤU HÌNH PHIÊN BẢN
+  async getVersionConfigs(): Promise<any[]> {
+    try {
+      const snapshot = await getDocs(collection(db, CONFIG_COLLECTION));
+      return snapshot.docs.map(doc => doc.data());
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, CONFIG_COLLECTION);
+      return [];
+    }
+  },
+
   async deleteScheduleByVersion(versionName: string): Promise<void> {
     try {
       const snapshot = await getDocs(collection(db, COLLECTION_NAME));
@@ -50,16 +76,18 @@ export const scheduleService = {
       
       snapshot.forEach(document => {
         const data = document.data();
-        // Nếu không có versionName thì coi là 'Không rõ'
         const currentVName = data.versionName || 'Không rõ';
-        
         if (currentVName === versionName) {
           batch.delete(document.ref);
           count++;
         }
       });
       
-      if (count > 0) {
+      // 🔥 Dọn dẹp luôn cấu hình số tuần khi xóa phiên bản
+      const configRef = doc(db, CONFIG_COLLECTION, versionName);
+      batch.delete(configRef);
+      
+      if (count > 0 || versionName !== 'Không rõ') {
         await batch.commit();
       }
     } catch (error) {
@@ -68,32 +96,37 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 HÀM MỚI: ĐỔI TÊN PHIÊN BẢN (CHIẾN THUẬT QUÉT TOÀN BỘ ĐỂ TRỊ LỖI UNDEFINED)
   async renameVersion(oldName: string, newName: string): Promise<void> {
     try {
-      // Lấy tất cả dữ liệu TKB không dùng query lọc (để tránh lỗi Firebase bỏ qua trường undefined)
       const snapshot = await getDocs(collection(db, COLLECTION_NAME));
       const batch = writeBatch(db);
       let count = 0;
 
       snapshot.forEach((document) => {
         const data = document.data();
-        // Logic kiểm tra: nếu không có trường versionName thì mặc định hiểu là 'Không rõ'
         const currentVName = data.versionName || 'Không rõ';
         
         if (currentVName === oldName) {
           const docRef = doc(db, COLLECTION_NAME, document.id);
-          // Ép Firebase ghi đè trường này (update sẽ tạo trường mới nếu chưa có)
           batch.update(docRef, { versionName: newName });
           count++;
         }
       });
 
-      // Chỉ commit nếu tìm thấy dữ liệu cần sửa
+      // 🔥 Đổi tên cả trong bảng cấu hình số tuần
+      const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
+      const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
+      
+      // Trong Firestore không có lệnh rename doc, nên ta phải lấy dữ liệu cũ và ghi sang doc mới
+      const configs = await this.getVersionConfigs();
+      const oldConfig = configs.find(c => c.versionName === oldName);
+      if (oldConfig) {
+        batch.set(newConfigRef, { ...oldConfig, versionName: newName });
+        batch.delete(oldConfigRef);
+      }
+
       if (count > 0) {
         await batch.commit();
-      } else {
-        console.warn("Không tìm thấy dữ liệu nào khớp với tên phiên bản:", oldName);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
@@ -104,10 +137,12 @@ export const scheduleService = {
   async deleteAllSchedules(): Promise<void> {
     try {
       const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const configSnapshot = await getDocs(collection(db, CONFIG_COLLECTION));
       const batch = writeBatch(db);
-      snapshot.forEach(doc => {
-        batch.delete(doc.ref);
-      });
+      
+      snapshot.forEach(doc => batch.delete(doc.ref));
+      configSnapshot.forEach(doc => batch.delete(doc.ref));
+      
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);

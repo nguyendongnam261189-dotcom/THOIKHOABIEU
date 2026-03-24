@@ -10,6 +10,7 @@ export const UserManagement: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
+  // Đã cập nhật lại danh sách tổ chuyên môn khớp với định dạng chuẩn từ file TKB
   const departments = [
     'Toán - Tin', 
     'KHTN và Công nghệ', 
@@ -30,6 +31,7 @@ export const UserManagement: React.FC = () => {
           ...doc.data()
         } as User));
         
+        // Sort users: pending first, then by email
         usersData.sort((a, b) => {
           if (a.status === 'pending' && b.status !== 'pending') return -1;
           if (a.status !== 'pending' && b.status === 'pending') return 1;
@@ -49,7 +51,7 @@ export const UserManagement: React.FC = () => {
 
   const handleRoleChange = (uid: string, role: 'admin' | 'teacher' | 'ttcm') => {
     setUsers(prevUsers => prevUsers.map(user => 
-      // Tự động xóa tổ nếu đổi quyền thành admin
+      // XÓA TỔ NẾU ĐỔI THÀNH ADMIN ĐỂ TRÁNH LỖI DỮ LIỆU THỪA
       user.uid === uid ? { ...user, role, department: role === 'admin' ? null : user.department } : user
     ));
   };
@@ -66,15 +68,17 @@ export const UserManagement: React.FC = () => {
     ));
   };
 
-  // 🔥 ĐÃ KHÔI PHỤC LẠI 100% LOGIC LƯU CODE GỐC CỦA THẦY
   const handleSave = async () => {
     setSaving(true);
     setStatus(null);
     try {
+      // In a real app, you'd track changes and only update modified users
+      // For simplicity, we update all users here
       const updatePromises = users.map(user => {
         const userRef = doc(db, 'users', user.uid);
         return updateDoc(userRef, {
           role: user.role,
+          // LUÔN LƯU NULL NẾU RỖNG CHỨ KHÔNG ĐỂ UNDEFINED
           department: user.department || null,
           status: user.status || 'approved'
         });
@@ -169,7 +173,7 @@ export const UserManagement: React.FC = () => {
                       value={user.role}
                       onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
                       className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                      disabled={user.email === 'nguyendongnam261189@gmail.com'}
+                      disabled={user.email === 'nguyendongnam261189@gmail.com'} // Prevent changing super admin
                     >
                       <option value="teacher">Giáo viên</option>
                       <option value="ttcm">Tổ trưởng CM</option>
@@ -181,7 +185,7 @@ export const UserManagement: React.FC = () => {
                       value={user.department || ''}
                       onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
                       className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:bg-gray-100 disabled:text-gray-400"
-                      // 🔥 CHỈ KHÓA Ô TỔ NẾU LÀ ADMIN
+                      // CHỈ KHÓA KHÔNG CHO CHỌN TỔ NẾU ĐANG LÀ ADMIN
                       disabled={user.role === 'admin'}
                     >
                       <option value="">-- Chọn tổ --</option>

@@ -10,9 +10,18 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
   const navigate = useNavigate();
   const [pendingCount, setPendingCount] = useState(0);
 
+  // 🔥 SỬA LẠI HÀM ĐĂNG XUẤT ĐỂ TRỊ BỆNH "KẸT BỘ NHỚ" CỦA IOS PWA
   const handleLogout = async () => {
-    await signOut(auth);
-    navigate('/login');
+    try {
+      await signOut(auth);
+      // Xóa toàn bộ bộ nhớ đệm của trình duyệt (trị bệnh của iOS)
+      localStorage.clear(); 
+      sessionStorage.clear();
+      // ÉP TẢI LẠI TRANG THẬT MẠNH TAY THAY VÌ CHUYỂN TRANG ẢO
+      window.location.href = '/login'; 
+    } catch (error) {
+      console.error("Lỗi đăng xuất:", error);
+    }
   };
 
   useEffect(() => {
@@ -32,6 +41,7 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
       <header className="bg-indigo-600 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
+            {/* SỰ KIỆN ONCLICK ĐỂ F5 TẢI LẠI TRANG CHỦ */}
             <div 
               className="flex items-center cursor-pointer hover:opacity-80 transition-opacity" 
               onClick={() => window.location.href = '/'}

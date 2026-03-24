@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Search, Calendar, Users, AlertCircle, layers } from 'lucide-react';
+import { Search, Calendar, Users, AlertCircle, Layers } from 'lucide-react';
 
 export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttcm' | null, department?: string | null, teacherName?: string | null }> = ({ role, department, teacherName }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
@@ -148,7 +148,10 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
                     <td key={`${day}-${row.buoi}-${row.tiet}`} className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r ${slot ? 'bg-indigo-50' : 'bg-gray-100/50'}`}>
                       {slot ? (
                         <div className="flex flex-col items-center">
-                          <span className="font-bold text-indigo-700">{slot.lop}</span>
+                          {/* 🔥 HIỂN THỊ: CHUYỂN DẤU CHẤM THÀNH DẤU GẠCH CHÉO TRÊN GIAO DIỆN */}
+                          <span className="font-bold text-indigo-700">
+                            {String(slot.lop).replace(/\./g, '/')}
+                          </span>
                           <span className="text-xs text-gray-600">{slot.mon}</span>
                           {hasRoom && <span className="text-xs text-gray-500">P.{cleanPhong}</span>}
                         </div>
@@ -163,6 +166,8 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
       </div>
     );
   };
+
+  const displayDepartment = isOrphanTeacher ? '(Chưa phân công)' : department;
 
   return (
     <div className="space-y-6">

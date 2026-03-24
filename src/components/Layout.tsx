@@ -5,7 +5,8 @@ import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Calendar, Users, LogOut, Upload, Search } from 'lucide-react';
 
-export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
+// 🔥 BỔ SUNG 'manager' VÀO KHAI BÁO KIỂU DỮ LIỆU
+export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -31,7 +32,6 @@ export const Layout: React.FC<{ role: 'admin' | 'teacher' | 'ttcm' | null }> = (
       <header className="bg-indigo-600 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            {/* THÊM SỰ KIỆN ONCLICK ĐỂ F5 TẢI LẠI TRANG CHỦ */}
             <div 
               className="flex items-center cursor-pointer hover:opacity-80 transition-opacity" 
               onClick={() => window.location.href = '/'}

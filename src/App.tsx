@@ -162,10 +162,10 @@ const App: React.FC = () => {
               element={role === 'admin' ? <UserManagement /> : <Navigate to="/" />} 
             />
 
-            {/* 🔥 ROUTE MỚI CHO TRANG THỐNG KÊ (Dành cho Admin và Manager) */}
+            {/* 🔥 ROUTE MỚI CHO TRANG THỐNG KÊ (Dành cho Admin, Manager và TTCM) */}
             <Route 
               path="dashboard" 
-              element={(role === 'admin' || role === 'manager') ? <Dashboard /> : <Navigate to="/" />} 
+              element={(role === 'admin' || role === 'manager' || role === 'ttcm') ? <Dashboard role={role} department={department} /> : <Navigate to="/" />} 
             />
 
             <Route 

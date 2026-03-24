@@ -72,7 +72,7 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
               <span className="font-bold text-xl tracking-tight">TKB Manager</span>
             </div>
             
-            {/* 🔥 MENU MÁY TÍNH (BẨN ĐI TRÊN ĐIỆN THOẠI) */}
+            {/* 🔥 MENU MÁY TÍNH (ẨN ĐI TRÊN ĐIỆN THOẠI) */}
             <nav className="hidden md:flex space-x-2">
               <Link to="/" className={getDesktopMenuClass('/')}>
                 <Search className="h-4 w-4 mr-2" /> TKB Giáo viên
@@ -81,7 +81,8 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
                 <Calendar className="h-4 w-4 mr-2" /> TKB Lớp
               </Link>
 
-              {(role === 'admin' || role === 'manager') && (
+              {/* 🔥 MỞ KHÓA MENU THỐNG KÊ CHO CẢ TTCM */}
+              {(role === 'admin' || role === 'manager' || role === 'ttcm') && (
                 <Link to="/dashboard" className={getDesktopMenuClass('/dashboard')}>
                   <BarChart3 className="h-4 w-4 mr-2" /> Thống kê
                 </Link>
@@ -179,9 +180,10 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
                 <Calendar className="h-5 w-5 mr-4" /> Tra TKB Lớp học
               </Link>
 
-              {(role === 'admin' || role === 'manager') && (
+              {/* 🔥 MỞ KHÓA MENU THỐNG KÊ CHO CẢ TTCM Ở MOBILE */}
+              {(role === 'admin' || role === 'manager' || role === 'ttcm') && (
                 <div className="pt-4 pb-2">
-                  <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Ban Giám Hiệu</p>
+                  <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Thống kê & Báo cáo</p>
                   <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/dashboard')}`}>
                     <BarChart3 className="h-5 w-5 mr-4" /> Bảng Thống kê
                   </Link>

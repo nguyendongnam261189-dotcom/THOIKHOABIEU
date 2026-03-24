@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Teacher } from '../types';
-// Import thêm deleteDoc để có chức năng xóa
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-// Thêm icon Trash2 (Thùng rác) và Bell (Chuông báo)
-import { Users, Save, CheckCircle, AlertCircle, Loader2, Trash2, BellRing } from 'lucide-react';
+// IMPORT THÊM ICON Search
+import { Users, Save, CheckCircle, AlertCircle, Loader2, Trash2, BellRing, Search, Filter } from 'lucide-react';
 import { teacherService } from '../services/teacherService';
 
 type ExtendedUser = User & { teacherName?: string | null };
@@ -15,6 +14,10 @@ export const UserManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+  // THÊM STATE CHO TÌM KIẾM VÀ BỘ LỌC
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterDept, setFilterDept] = useState('');
 
   const departments = [
     'Toán - Tin', 
@@ -79,12 +82,11 @@ export const UserManagement: React.FC = () => {
     ));
   };
 
-  // 🔥 TÍNH NĂNG MỚI: XÓA NGƯỜI DÙNG
   const handleDeleteUser = async (uid: string, email: string) => {
     if (window.confirm(`⚠️ CẢNH BÁO: Bạn có chắc chắn muốn XÓA tài khoản ${email} khỏi hệ thống không?`)) {
       try {
-        await deleteDoc(doc(db, 'users', uid)); // Xóa trên Firebase
-        setUsers(prevUsers => prevUsers.filter(user => user.uid !== uid)); // Xóa trên giao diện
+        await deleteDoc(doc(db, 'users', uid));
+        setUsers(prevUsers => prevUsers.filter(user => user.uid !== uid));
         setStatus({ type: 'success', message: `Đã xóa tài khoản ${email} thành công!` });
       } catch (error: any) {
         setStatus({ type: 'error', message: `Lỗi khi xóa: ${error.message}` });
@@ -116,9 +118,26 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  // 🔥 LOGIC PHÂN LOẠI VÀ GOM NHÓM
-  const pendingUsers = useMemo(() => users.filter(u => u.status === 'pending'), [users]);
-  const processedUsers = useMemo(() => users.filter(u => u.status !== 'pending'), [users]);
+  // 🔥 LOGIC TÌM KIẾM VÀ LỌC (Sàng lọc trước khi chia nhóm)
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const searchLower = searchTerm.toLowerCase();
+      // Tìm theo email HOẶC tên hiển thị
+      const matchesSearch = user.email.toLowerCase().includes(searchLower) || 
+                            (user.name || '').toLowerCase().includes(searchLower);
+      
+      // Lọc theo tổ (Xử lý trường hợp "Chưa phân tổ")
+      const matchesDept = filterDept 
+        ? (filterDept === 'unassigned' ? !user.department : user.department === filterDept)
+        : true;
+
+      return matchesSearch && matchesDept;
+    });
+  }, [users, searchTerm, filterDept]);
+
+  // Phân loại nhóm Pending và Processed dựa trên danh sách ĐÃ LỌC
+  const pendingUsers = useMemo(() => filteredUsers.filter(u => u.status === 'pending'), [filteredUsers]);
+  const processedUsers = useMemo(() => filteredUsers.filter(u => u.status !== 'pending'), [filteredUsers]);
 
   const groupedUsers = useMemo(() => {
     const groups: Record<string, ExtendedUser[]> = {};
@@ -130,7 +149,6 @@ export const UserManagement: React.FC = () => {
     return groups;
   }, [processedUsers]);
 
-  // HÀM HIỂN THỊ BẢNG (Tái sử dụng cho cả nhóm Pending và các Tổ)
   const renderUserTable = (userList: ExtendedUser[], isPendingTable: boolean = false) => (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200">
@@ -213,7 +231,7 @@ export const UserManagement: React.FC = () => {
                 <td className="px-4 py-4 whitespace-nowrap text-center">
                   <button
                     onClick={() => handleDeleteUser(user.uid, user.email)}
-                    disabled={user.email === 'nguyendongnam261189@gmail.com'} // Cấm xóa sếp tổng
+                    disabled={user.email === 'nguyendongnam261189@gmail.com'}
                     className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
                     title="Xóa tài khoản"
                   >
@@ -239,7 +257,7 @@ export const UserManagement: React.FC = () => {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 sticky top-0 z-10">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-2xl font-bold text-gray-800 flex items-center">
               <Users className="mr-2 text-indigo-600" /> Quản lý Người dùng & Phân tổ
@@ -256,8 +274,37 @@ export const UserManagement: React.FC = () => {
           </button>
         </div>
 
+        {/* THANH TÌM KIẾM VÀ BỘ LỌC */}
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <input
+              type="text"
+              placeholder="Tìm kiếm theo email hoặc tên hiển thị..."
+              className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchName(e.target.value)} // Fixes here in update
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+            <select
+              className="pl-10 pr-8 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 shadow-sm min-w-[220px] bg-white"
+              value={filterDept}
+              onChange={(e) => setFilterDept(e.target.value)}
+            >
+              <option value="">Tất cả tổ chuyên môn</option>
+              {departments.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+              <option value="unassigned" className="font-bold text-red-600">-- Chưa phân tổ --</option>
+            </select>
+          </div>
+        </div>
+
         {status && (
-          <div className={`mt-4 p-4 rounded-lg flex items-start ${status.type === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+          <div className={`mt-6 p-4 rounded-lg flex items-start ${status.type === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
             {status.type === 'success' ? <CheckCircle className="h-5 w-5 text-green-500 mr-2 mt-0.5" /> : <AlertCircle className="h-5 w-5 text-red-500 mr-2 mt-0.5" />}
             <p className={`text-sm font-medium ${status.type === 'success' ? 'text-green-700' : 'text-red-700'}`}>
               {status.message}
@@ -266,7 +313,6 @@ export const UserManagement: React.FC = () => {
         )}
       </div>
 
-      {/* 1. KHU VỰC VIP: GIÁO VIÊN MỚI CHỜ DUYỆT */}
       {pendingUsers.length > 0 && (
         <div className="bg-white border-2 border-amber-300 rounded-xl overflow-hidden shadow-lg animate-in fade-in slide-in-from-bottom-4">
           <div className="bg-amber-100 px-4 py-3 border-b border-amber-200 flex justify-between items-center">
@@ -279,7 +325,6 @@ export const UserManagement: React.FC = () => {
         </div>
       )}
 
-      {/* 2. KHU VỰC TỔ CHUYÊN MÔN: ĐÃ DUYỆT */}
       <div className="space-y-6">
         {Object.keys(groupedUsers).sort().map((groupName) => (
           <div key={groupName} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
@@ -297,11 +342,10 @@ export const UserManagement: React.FC = () => {
 
         {processedUsers.length === 0 && pendingUsers.length === 0 && (
           <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-            Không có dữ liệu người dùng.
+            {(searchTerm || filterDept) ? 'Không tìm thấy tài khoản nào khớp với bộ lọc.' : 'Chưa có dữ liệu người dùng.'}
           </div>
         )}
       </div>
-
     </div>
   );
 };

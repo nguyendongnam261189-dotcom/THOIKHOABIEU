@@ -55,7 +55,8 @@ const Rejected = () => (
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
-  const [role, setRole] = useState<'admin' | 'teacher' | 'ttcm' | null>(null);
+  // 🔥 BỔ SUNG 'manager' VÀO KHAI BÁO STATE
+  const [role, setRole] = useState<'admin' | 'manager' | 'teacher' | 'ttcm' | null>(null);
   const [department, setDepartment] = useState<string | null>(null);
   const [teacherName, setTeacherName] = useState<string | null>(null); // THÊM STATE LƯU TÊN GIÁO VIÊN
   const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
@@ -84,8 +85,8 @@ const App: React.FC = () => {
           
           if (userDoc.exists()) {
             const data = userDoc.data();
-            // LẤY 100% QUYỀN VÀ TRẠNG THÁI TỪ FIREBASE
-            setRole(data.role as 'admin' | 'teacher' | 'ttcm');
+            // 🔥 BỔ SUNG 'manager' VÀO ÉP KIỂU (TYPE CASTING)
+            setRole(data.role as 'admin' | 'manager' | 'teacher' | 'ttcm');
             setDepartment(data.department || null);
             setTeacherName(data.teacherName || null); // ĐỌC TÊN GIÁO VIÊN TỪ FIREBASE
             setStatus(data.status || 'pending');

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { User, Teacher } from '../types';
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-// IMPORT THÊM ICON Search
 import { Users, Save, CheckCircle, AlertCircle, Loader2, Trash2, BellRing, Search, Filter } from 'lucide-react';
 import { teacherService } from '../services/teacherService';
 
@@ -15,7 +14,6 @@ export const UserManagement: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
-  // THÊM STATE CHO TÌM KIẾM VÀ BỘ LỌC
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDept, setFilterDept] = useState('');
 
@@ -53,13 +51,14 @@ export const UserManagement: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleRoleChange = (uid: string, role: 'admin' | 'teacher' | 'ttcm') => {
+  // 🔥 BỔ SUNG KIỂU 'manager' VÀ XỬ LÝ XÓA TỔ/TÊN CHO BGH
+  const handleRoleChange = (uid: string, role: 'admin' | 'manager' | 'teacher' | 'ttcm') => {
     setUsers(prevUsers => prevUsers.map(user => 
       user.uid === uid ? { 
         ...user, 
         role, 
-        department: role === 'admin' ? null : user.department,
-        teacherName: role === 'admin' ? null : user.teacherName
+        department: (role === 'admin' || role === 'manager') ? null : user.department,
+        teacherName: (role === 'admin' || role === 'manager') ? null : user.teacherName
       } : user
     ));
   };
@@ -118,15 +117,12 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  // 🔥 LOGIC TÌM KIẾM VÀ LỌC (Sàng lọc trước khi chia nhóm)
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
       const searchLower = searchTerm.toLowerCase();
-      // Tìm theo email HOẶC tên hiển thị
       const matchesSearch = user.email.toLowerCase().includes(searchLower) || 
                             (user.name || '').toLowerCase().includes(searchLower);
       
-      // Lọc theo tổ (Xử lý trường hợp "Chưa phân tổ")
       const matchesDept = filterDept 
         ? (filterDept === 'unassigned' ? !user.department : user.department === filterDept)
         : true;
@@ -135,7 +131,6 @@ export const UserManagement: React.FC = () => {
     });
   }, [users, searchTerm, filterDept]);
 
-  // Phân loại nhóm Pending và Processed dựa trên danh sách ĐÃ LỌC
   const pendingUsers = useMemo(() => filteredUsers.filter(u => u.status === 'pending'), [filteredUsers]);
   const processedUsers = useMemo(() => filteredUsers.filter(u => u.status !== 'pending'), [filteredUsers]);
 
@@ -193,12 +188,14 @@ export const UserManagement: React.FC = () => {
                 <td className="px-4 py-4 whitespace-nowrap">
                   <select
                     value={user.role}
-                    onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'teacher' | 'ttcm')}
+                    // 🔥 BỔ SUNG 'manager' VÀO ĐÂY
+                    onChange={(e) => handleRoleChange(user.uid, e.target.value as 'admin' | 'manager' | 'teacher' | 'ttcm')}
                     className="block w-full pl-3 pr-8 py-2 text-sm border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 rounded-md font-medium"
                     disabled={user.email === 'nguyendongnam261189@gmail.com'}
                   >
                     <option value="teacher">Giáo viên</option>
                     <option value="ttcm">Tổ trưởng CM</option>
+                    <option value="manager">Ban Giám hiệu</option>
                     <option value="admin">Quản trị viên</option>
                   </select>
                 </td>
@@ -207,7 +204,8 @@ export const UserManagement: React.FC = () => {
                     value={user.department || ''}
                     onChange={(e) => handleDepartmentChange(user.uid, e.target.value)}
                     className="block w-full pl-3 pr-8 py-2 text-sm border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 rounded-md disabled:bg-gray-100 disabled:text-gray-400"
-                    disabled={user.role === 'admin'}
+                    // 🔥 KHÓA CHỌN TỔ NẾU LÀ ADMIN HOẶC MANAGER
+                    disabled={user.role === 'admin' || user.role === 'manager'}
                   >
                     <option value="">-- Chọn tổ --</option>
                     {departments.map(dept => (
@@ -219,8 +217,9 @@ export const UserManagement: React.FC = () => {
                   <select
                     value={user.teacherName || ''}
                     onChange={(e) => handleTeacherLinkChange(user.uid, e.target.value)}
-                    className={`block w-full pl-3 pr-8 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 rounded-md shadow-sm border ${!user.teacherName && user.role !== 'admin' ? 'border-red-300 bg-red-50 text-red-700' : 'border-indigo-300 bg-white text-indigo-700 font-bold'}`}
-                    disabled={user.role === 'admin' || !user.department}
+                    className={`block w-full pl-3 pr-8 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500 rounded-md shadow-sm border ${!user.teacherName && user.role !== 'admin' && user.role !== 'manager' ? 'border-red-300 bg-red-50 text-red-700' : 'border-indigo-300 bg-white text-indigo-700 font-bold'}`}
+                    // 🔥 KHÓA CHỌN TÊN GV NẾU LÀ ADMIN HOẶC MANAGER
+                    disabled={user.role === 'admin' || user.role === 'manager' || !user.department}
                   >
                     <option value="">{user.department ? '-- Chọn tên GV --' : '-- Chọn Tổ trước --'}</option>
                     {availableTeachersInDept.map(t => (
@@ -274,7 +273,6 @@ export const UserManagement: React.FC = () => {
           </button>
         </div>
 
-        {/* THANH TÌM KIẾM VÀ BỘ LỌC */}
         <div className="flex flex-col md:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
@@ -283,7 +281,6 @@ export const UserManagement: React.FC = () => {
               placeholder="Tìm kiếm theo email hoặc tên hiển thị..."
               className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
               value={searchTerm}
-              onChange={(e) => setSearchName(e.target.value)} // Fixes here in update
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>

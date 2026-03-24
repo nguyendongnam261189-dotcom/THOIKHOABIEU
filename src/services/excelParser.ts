@@ -288,8 +288,15 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                           normalizedTiet -= 5; finalBuoi = 'Chiều'; 
                         }
 
+                        // 🔥 CẠO SẠCH PHÒNG HỌC TẠI ĐÂY (TRỊ LỖI CHỮ P.)
                         const scheduleObj: Schedule = {
-                          thu: currentThu, tiet: normalizedTiet, lop: lop, mon: mon, giao_vien: giao_vien, phong: '', buoi: finalBuoi
+                          thu: currentThu, 
+                          tiet: normalizedTiet, 
+                          lop: lop, 
+                          mon: mon, 
+                          giao_vien: giao_vien, 
+                          phong: '', // Để trống vì Parser này không đọc cột phòng chuyên dụng
+                          buoi: finalBuoi
                         };
 
                         const key = `${currentThu}-${finalBuoi}-${normalizedTiet}-${giao_vien}-${mon}`;
@@ -332,17 +339,12 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
         });
 
-        // ============================================================================
-        // BƯỚC 4: THUẬT TOÁN "DẤU VÂN TAY LỚP HỌC" - ĐỒNG BỘ 100% TÊN
-        // ============================================================================
+        // 4. THUẬT TOÁN ĐỒNG BỘ TÊN (DẤU VÂN TAY LỚP HỌC)
         const shortToFullName = new Map<string, string>();
-        
         if (pcgdSheetName) {
             const worksheet = workbook.Sheets[pcgdSheetName];
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
-            
             let fullNameColIdx = -1; let pccmColIdx = -1; let cnColIdx = -1; let headerRowIdx = -1;
-            
             for (let i = 0; i < Math.min(15, jsonData.length); i++) {
                 const row = jsonData[i] || [];
                 for (let c = 0; c < row.length; c++) {
@@ -353,40 +355,24 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                 }
                 if (fullNameColIdx !== -1) { headerRowIdx = i; break; }
             }
-            
             const pcgdTeachers: { fullName: string, uniqueName: string, firstName: string, classes: Set<string>, pccmStr: string }[] = [];
-            
             if (fullNameColIdx !== -1) {
                 for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
                     const row = jsonData[i] || [];
                     const fullName = cleanString(row[fullNameColIdx]);
                     if (!fullName || fullName.length < 4 || !fullName.includes(' ')) continue;
-
                     const parts = fullName.split(' ');
                     const firstName = parts[parts.length - 1].toUpperCase();
-
                     const pccmStr = pccmColIdx !== -1 ? cleanString(row[pccmColIdx]) : '';
                     const cnStr = cnColIdx !== -1 ? cleanString(row[cnColIdx]) : '';
                     const combinedStr = pccmStr + ' ' + cnStr;
-
-                    // QUAN TRỌNG: Tìm tất cả các lớp dạng "6.5", "8/11" từ chuỗi PCGD
                     const classMatches = combinedStr.match(/\d{1,2}\s*[./]\s*\d{1,2}/g) || [];
                     const pcgdClasses = new Set(classMatches.map(c => c.replace(/\s+/g, '').replace('.', '/').toUpperCase()));
-
-                    pcgdTeachers.push({
-                        fullName: fullName,
-                        uniqueName: fullName,
-                        firstName: firstName,
-                        classes: pcgdClasses,
-                        pccmStr: pccmStr.toUpperCase()
-                    });
+                    pcgdTeachers.push({ fullName, uniqueName: fullName, firstName, classes: pcgdClasses, pccmStr: pccmStr.toUpperCase() });
                 }
             }
-
-            // CHỐNG TRÙNG TÊN: Đảm bảo 105 người không bị mất ai
             const nameCounts = new Map<string, number>();
             pcgdTeachers.forEach(t => nameCounts.set(t.fullName, (nameCounts.get(t.fullName) || 0) + 1));
-
             pcgdTeachers.forEach(t => {
                 if (nameCounts.get(t.fullName)! > 1) {
                     if (t.fullName.toLowerCase() === 'nguyễn thị vân') {
@@ -397,8 +383,6 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                     }
                 }
             });
-            
-            // XÁC ĐỊNH LỚP HỌC CHO TỪNG GIÁO VIÊN TRONG TKB
             const tkbTeacherData = new Map<string, { classes: Set<string>, subjects: Set<string> }>();
             uniqueSchedules.forEach(s => {
                 if (!tkbTeacherData.has(s.giao_vien)) tkbTeacherData.set(s.giao_vien, { classes: new Set(), subjects: new Set() });
@@ -409,52 +393,29 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                 });
                 if (s.mon) data.subjects.add(s.mon.toUpperCase());
             });
-
-            // SO KHỚP CHÍNH XÁC
             allTeachersMap.forEach((teacher, shortName) => {
                 const tkbData = tkbTeacherData.get(shortName);
                 const tkbClasses = tkbData?.classes || new Set();
-                
-                let bestMatch = null;
-                let maxScore = -1;
-                
+                let bestMatch = null; let maxScore = -1;
                 const shortNameUpper = shortName.toUpperCase();
                 const shortNameNoSpace = shortNameUpper.replace(/[-._\s]/g, '');
-
                 pcgdTeachers.forEach(cand => {
                     let score = 0;
-
-                    // 1. CHẤM ĐIỂM "VÂN TAY LỚP HỌC" (1000 điểm cho MỖI LỚP trùng khớp)
                     let classMatchCount = 0;
-                    tkbClasses.forEach(c => {
-                        if (cand.classes.has(c)) classMatchCount++;
-                    });
+                    tkbClasses.forEach(c => { if (cand.classes.has(c)) classMatchCount++; });
                     score += classMatchCount * 1000;
-
-                    // 2. CHẤM ĐIỂM TÊN GỌI (Phòng hờ GV không dạy lớp cụ thể)
                     const candFullNameUpper = cand.fullName.toUpperCase();
                     if (candFullNameUpper === shortNameUpper) score += 500;
                     else if (candFullNameUpper.includes(shortNameUpper)) score += 100;
                     else if (shortNameNoSpace.includes(cand.firstName)) score += 50;
-
-                    // 3. CHẤM ĐIỂM MÔN HỌC (Tie-breaker)
                     tkbData?.subjects.forEach(sub => {
                         const coreSub = sub.replace(/[-+]/g, ' ').split(' ')[0];
                         if (coreSub.length >= 2 && cand.pccmStr.includes(coreSub)) score += 10;
                     });
-
-                    if (score > maxScore) {
-                        maxScore = score;
-                        bestMatch = cand;
-                    }
+                    if (score > maxScore) { maxScore = score; bestMatch = cand; }
                 });
-                
-                // Gán tên: Cần ít nhất 50 điểm (trùng tên chữ cuối) hoặc 1000đ (Trùng lớp học)
-                if (bestMatch && maxScore >= 50) {
-                    shortToFullName.set(shortName, (bestMatch as any).uniqueName);
-                } else {
-                    shortToFullName.set(shortName, shortName);
-                }
+                if (bestMatch && maxScore >= 50) shortToFullName.set(shortName, (bestMatch as any).uniqueName);
+                else shortToFullName.set(shortName, shortName);
             });
         }
         

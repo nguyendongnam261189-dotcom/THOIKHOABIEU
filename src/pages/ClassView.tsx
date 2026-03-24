@@ -70,13 +70,18 @@ export const ClassView: React.FC = () => {
                   const adjustedPeriod = period <= 5 ? period : period - 5;
                   const slot = classSchedules.find(s => s.thu === day && s.tiet === adjustedPeriod && s.buoi === session);
                   
+                  // 🔥 LOGIC DIỆT CHỮ P MỚI: Cạo sạch khoảng trắng, ép về chữ thường để so sánh
+                  const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
+                  const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
+
                   return (
                     <td key={`${day}-${period}`} className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r ${slot ? 'bg-emerald-50' : 'bg-gray-100/50'}`}>
                       {slot ? (
                         <div className="flex flex-col items-center">
                           <span className="font-bold text-emerald-700">{slot.mon}</span>
                           <span className="text-xs text-gray-600">{slot.giao_vien}</span>
-                          <span className="text-xs text-gray-500">P.{slot.phong}</span>
+                          {/* 🔥 CHỈ HIỆN P. KHI THẬT SỰ CÓ SỐ PHÒNG SAU KHI ĐÃ CẠO SẠCH KHOẢNG TRẮNG */}
+                          {hasRoom && <span className="text-xs text-gray-500">P.{cleanPhong}</span>}
                         </div>
                       ) : (
                         <span className="text-gray-400 text-xs italic">Trống</span>
@@ -139,12 +144,12 @@ export const ClassView: React.FC = () => {
 
         {/* Selected Class Schedule */}
         {selectedClass && (
-          <div>
+          <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-emerald-700">TKB Lớp: {selectedClass}</h3>
               <button 
                 onClick={() => setSelectedClass(null)}
-                className="text-sm text-gray-600 hover:text-emerald-600 underline"
+                className="text-sm text-white bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors font-medium"
               >
                 ← Chọn lớp khác
               </button>

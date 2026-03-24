@@ -1,14 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, Link, useNavigate } from 'react-router-dom';
+// 🔥 THÊM useLocation ĐỂ NHẬN DIỆN TRANG HIỆN TẠI
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-// 🔥 IMPORT THÊM ICON BarChart3 CHO DASHBOARD
-import { Calendar, Users, LogOut, Upload, Search, BarChart3 } from 'lucide-react';
+// 🔥 THÊM Menu, X ĐỂ LÀM NÚT BẤM ĐIỆN THOẠI
+import { Calendar, Users, LogOut, Upload, Search, BarChart3, Menu, X } from 'lucide-react';
 
 export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
+  const location = useLocation(); // Lấy đường dẫn hiện tại
   const [pendingCount, setPendingCount] = useState(0);
+  
+  // 🔥 STATE ĐÓNG/MỞ MENU TRÊN ĐIỆN THOẠI
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -23,150 +28,207 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
 
   useEffect(() => {
     if (role !== 'admin') return;
-
     const q = query(collection(db, 'users'), where('status', '==', 'pending'));
-    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPendingCount(snapshot.docs.length);
     });
-
     return () => unsubscribe();
   }, [role]);
 
+  // HÀM KIỂM TRA XEM LINK NÀY CÓ ĐANG ĐƯỢC CHỌN KHÔNG
+  const isActive = (path: string) => location.pathname === path;
+
+  // HÀM TẠO CLASS CSS CHO MENU MÁY TÍNH
+  const getDesktopMenuClass = (path: string) => {
+    return `flex items-center px-3 py-2 rounded-md font-medium transition-colors ${
+      isActive(path) 
+        ? 'bg-indigo-900 text-white shadow-inner' // Đang chọn thì nền đậm
+        : 'text-indigo-50 hover:bg-indigo-500 hover:text-white' // Chưa chọn
+    }`;
+  };
+
+  // HÀM TẠO CLASS CSS CHO MENU ĐIỆN THOẠI
+  const getMobileMenuClass = (path: string) => {
+    return `flex items-center w-full px-4 py-3 rounded-xl font-medium transition-colors ${
+      isActive(path)
+        ? 'bg-indigo-100 text-indigo-800' // Đang chọn thì nền xanh nhạt
+        : 'text-gray-600 hover:bg-gray-100' // Chưa chọn
+    }`;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-indigo-600 text-white shadow-md">
+      {/* KHU VỰC HEADER (THANH TRÊN CÙNG) */}
+      <header className="bg-indigo-600 text-white shadow-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
+            
             <div 
               className="flex items-center cursor-pointer hover:opacity-80 transition-opacity" 
               onClick={() => window.location.href = '/'}
               title="Về Trang chủ & Làm mới dữ liệu"
             >
               <Calendar className="h-8 w-8 mr-3" />
-              <span className="font-bold text-xl">TKB Manager</span>
+              <span className="font-bold text-xl tracking-tight">TKB Manager</span>
             </div>
             
-            <nav className="hidden md:flex space-x-4">
-              {/* 🔥 MENU DASHBOARD CHO ADMIN VÀ MANAGER */}
+            {/* 🔥 MENU MÁY TÍNH (BẨN ĐI TRÊN ĐIỆN THOẠI) */}
+            <nav className="hidden md:flex space-x-2">
+              <Link to="/" className={getDesktopMenuClass('/')}>
+                <Search className="h-4 w-4 mr-2" /> TKB Giáo viên
+              </Link>
+              <Link to="/class" className={getDesktopMenuClass('/class')}>
+                <Calendar className="h-4 w-4 mr-2" /> TKB Lớp
+              </Link>
+
               {(role === 'admin' || role === 'manager') && (
-                <Link to="/dashboard" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                  <BarChart3 className="h-5 w-5 mr-2" />
-                  Thống kê
+                <Link to="/dashboard" className={getDesktopMenuClass('/dashboard')}>
+                  <BarChart3 className="h-4 w-4 mr-2" /> Thống kê
                 </Link>
+              )}
+
+              {(role === 'admin' || role === 'ttcm') && (
+                <>
+                  <Link to="/teacher-management" className={getDesktopMenuClass('/teacher-management')}>
+                    <Users className="h-4 w-4 mr-2" /> Giáo viên
+                  </Link>
+                  <Link to="/substitute" className={getDesktopMenuClass('/substitute')}>
+                    <Users className="h-4 w-4 mr-2" /> Dạy thay
+                  </Link>
+                </>
               )}
 
               {role === 'admin' && (
                 <>
-                  <Link to="/admin" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                    <Upload className="h-5 w-5 mr-2" />
-                    Quản lý Dữ liệu
+                  <Link to="/admin" className={getDesktopMenuClass('/admin')}>
+                    <Upload className="h-4 w-4 mr-2" /> Dữ liệu
                   </Link>
-                  <Link to="/users" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500 relative">
-                    <div className="relative mr-2">
-                      <Users className="h-5 w-5" />
-                      {pendingCount > 0 && (
-                        <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                        </span>
-                      )}
-                    </div>
-                    Người dùng
+                  <Link to="/users" className={`${getDesktopMenuClass('/users')} relative`}>
+                    <Users className="h-4 w-4 mr-2" /> Tài khoản
+                    {pendingCount > 0 && (
+                      <span className="absolute top-1 right-1 flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                      </span>
+                    )}
                   </Link>
                 </>
               )}
-              {(role === 'admin' || role === 'ttcm') && (
-                <>
-                  <Link to="/teacher-management" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                    <Users className="h-5 w-5 mr-2" />
-                    Giáo viên
-                  </Link>
-                  <Link to="/substitute" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                    <Users className="h-5 w-5 mr-2" />
-                    Dạy thay
-                  </Link>
-                </>
-              )}
-              <Link to="/" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                <Search className="h-5 w-5 mr-2" />
-                TKB Giáo viên
-              </Link>
-              <Link to="/class" className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                <Calendar className="h-5 w-5 mr-2" />
-                TKB Lớp
-              </Link>
-              <button onClick={handleLogout} className="flex items-center px-3 py-2 rounded-md hover:bg-indigo-500">
-                <LogOut className="h-5 w-5 mr-2" />
-                Đăng xuất
+              
+              {/* Nút đăng xuất làm riêng màu đỏ nhạt */}
+              <button 
+                onClick={handleLogout} 
+                className="flex items-center px-3 py-2 rounded-md font-medium text-red-100 hover:bg-red-500 hover:text-white transition-colors ml-2"
+              >
+                <LogOut className="h-4 w-4 mr-2" /> Thoát
               </button>
             </nav>
+
+            {/* 🔥 NÚT BẤM HIỆN MENU ĐIỆN THOẠI (HAMBURGER) */}
+            <div className="md:hidden flex items-center">
+              <button 
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="p-2 rounded-md hover:bg-indigo-500 transition-colors focus:outline-none relative"
+              >
+                <Menu className="h-7 w-7 text-white" />
+                {pendingCount > 0 && role === 'admin' && (
+                  <span className="absolute top-1 right-1 flex h-3 w-3">
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-indigo-600"></span>
+                  </span>
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8">
+      {/* KHU VỰC NỘI DUNG CHÍNH */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-10">
         <Outlet />
       </main>
 
-      {/* Mobile Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-gray-200 flex overflow-x-auto hide-scrollbar py-2 z-50 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
-        <div className="flex px-2 space-x-6 min-w-max mx-auto items-center">
-          <Link to="/" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-            <Search className="h-5 w-5" />
-            <span className="text-[10px] mt-1 font-medium">TKB GV</span>
-          </Link>
-          <Link to="/class" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-            <Calendar className="h-5 w-5" />
-            <span className="text-[10px] mt-1 font-medium">TKB Lớp</span>
-          </Link>
-          
-          {/* 🔥 MENU DASHBOARD MOBILE CHO ADMIN VÀ MANAGER */}
-          {(role === 'admin' || role === 'manager') && (
-            <Link to="/dashboard" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-              <BarChart3 className="h-5 w-5" />
-              <span className="text-[10px] mt-1 font-medium">Thống kê</span>
-            </Link>
-          )}
+      {/* =======================================================
+          🔥 MENU DỌC CHO ĐIỆN THOẠI (SIDEBAR SLIDE-IN) 
+          ======================================================= */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          {/* Lớp phủ đen mờ (Bấm vào để đóng) */}
+          <div 
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
+            onClick={() => setIsMobileMenuOpen(false)}
+          ></div>
 
-          {role === 'admin' && (
-            <>
-              <Link to="/admin" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-                <Upload className="h-5 w-5" />
-                <span className="text-[10px] mt-1 font-medium">Dữ liệu</span>
+          {/* Bảng Menu Dọc trượt từ phải sang */}
+          <div className="relative ml-auto flex h-full w-[280px] max-w-xs flex-col overflow-y-auto bg-white shadow-2xl animate-in slide-in-from-right-full duration-300">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50/50">
+              <span className="font-bold text-xl text-indigo-900">Tính năng</span>
+              <button 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="rounded-full p-2 text-gray-500 hover:bg-gray-200 transition-colors"
+              >
+                <X className="h-6 w-6 text-gray-700" />
+              </button>
+            </div>
+
+            <div className="px-4 py-6 space-y-2">
+              <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className={getMobileMenuClass('/')}>
+                <Search className="h-5 w-5 mr-4" /> Tra TKB Giáo viên
               </Link>
-              <Link to="/users" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-                <div className="relative">
-                  <Users className="h-5 w-5" />
-                  {pendingCount > 0 && (
-                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                    </span>
-                  )}
+              <Link to="/class" onClick={() => setIsMobileMenuOpen(false)} className={getMobileMenuClass('/class')}>
+                <Calendar className="h-5 w-5 mr-4" /> Tra TKB Lớp học
+              </Link>
+
+              {(role === 'admin' || role === 'manager') && (
+                <div className="pt-4 pb-2">
+                  <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Ban Giám Hiệu</p>
+                  <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/dashboard')}`}>
+                    <BarChart3 className="h-5 w-5 mr-4" /> Bảng Thống kê
+                  </Link>
                 </div>
-                <span className="text-[10px] mt-1 font-medium">Tài khoản</span>
-              </Link>
-            </>
-          )}
-          {(role === 'admin' || role === 'ttcm') && (
-            <>
-              <Link to="/teacher-management" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-                <Users className="h-5 w-5" />
-                <span className="text-[10px] mt-1 font-medium">Giáo viên</span>
-              </Link>
-              <Link to="/substitute" className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-                <Users className="h-5 w-5" />
-                <span className="text-[10px] mt-1 font-medium">Dạy thay</span>
-              </Link>
-            </>
-          )}
-          <button onClick={handleLogout} className="flex flex-col items-center text-gray-600 hover:text-indigo-600 min-w-[60px]">
-            <LogOut className="h-5 w-5" />
-            <span className="text-[10px] mt-1 font-medium">Thoát</span>
-          </button>
+              )}
+
+              {(role === 'admin' || role === 'ttcm') && (
+                <div className="pt-4 pb-2">
+                  <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Quản lý Chuyên môn</p>
+                  <Link to="/teacher-management" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/teacher-management')}`}>
+                    <Users className="h-5 w-5 mr-4" /> Phân công GV
+                  </Link>
+                  <Link to="/substitute" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/substitute')}`}>
+                    <Users className="h-5 w-5 mr-4" /> Xếp Dạy thay
+                  </Link>
+                </div>
+              )}
+
+              {role === 'admin' && (
+                <div className="pt-4 pb-2">
+                  <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Quản trị Hệ thống</p>
+                  <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/admin')}`}>
+                    <Upload className="h-5 w-5 mr-4" /> Tải dữ liệu TKB
+                  </Link>
+                  <Link to="/users" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 relative ${getMobileMenuClass('/users')}`}>
+                    <Users className="h-5 w-5 mr-4" /> Duyệt Tài khoản
+                    {pendingCount > 0 && (
+                      <span className="absolute right-4 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">
+                        {pendingCount} mới
+                      </span>
+                    )}
+                  </Link>
+                </div>
+              )}
+
+              <div className="pt-8 mt-8 border-t border-gray-100">
+                <button 
+                  onClick={handleLogout} 
+                  className="flex items-center justify-center w-full px-4 py-3 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 transition-colors shadow-md"
+                >
+                  <LogOut className="h-5 w-5 mr-2" /> Đăng xuất hệ thống
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </nav>
+      )}
     </div>
   );
 };

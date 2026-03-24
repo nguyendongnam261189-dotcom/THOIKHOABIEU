@@ -2,11 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Search, Calendar, Users, AlertCircle } from 'lucide-react';
+import { Search, Calendar, Users, AlertCircle, layers } from 'lucide-react';
 
-// THÊM BIẾN teacherName VÀ manager VÀO COMPONENT
 export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttcm' | null, department?: string | null, teacherName?: string | null }> = ({ role, department, teacherName }) => {
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [searchName, setSearchName] = useState('');
   const [selectedTeacher, setSelectedTeacher] = useState<string | null>(null);
@@ -14,35 +13,42 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
   const [filterGroup, setFilterGroup] = useState('');
   const [filterSession, setFilterSession] = useState('');
   
+  // 🔥 STATES MỚI CHO ĐA PHIÊN BẢN
+  const [versions, setVersions] = useState<string[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<string>('');
+  
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false); 
 
-  // 🔥 KIỂM TRA XEM GV ĐÃ BỊ MỒ CÔI TỔ CHƯA HOẶC CHƯA LIÊN KẾT TÊN (Manager và Admin không bị ảnh hưởng)
   const isOrphanTeacher = (role !== 'admin' && role !== 'manager') && (!department || department === 'undefined' || String(department) === 'null');
   const isMissingLink = (role !== 'admin' && role !== 'manager') && !isOrphanTeacher && (!teacherName || String(teacherName) === 'null');
 
   useEffect(() => {
     const fetchData = async () => {
-      const allSchedules = await scheduleService.getAllSchedules();
-      const allTeachers = await teacherService.getAllTeachers();
-      setSchedules(allSchedules);
+      const schedulesData = await scheduleService.getAllSchedules();
+      const teachersData = await teacherService.getAllTeachers();
+      setAllSchedules(schedulesData);
       
-      let allowedTeachers = allTeachers;
-      // 🔥 NẾU KHÔNG PHẢI ADMIN VÀ KHÔNG PHẢI MANAGER THÌ CẮT SẠCH DANH SÁCH (CHỈ CHO XEM TỔ HOẶC KHÔNG XEM GÌ)
+      // 🔥 TRÍCH XUẤT DANH SÁCH PHIÊN BẢN TỪ DỮ LIỆU
+      const uniqueVersions = Array.from(new Set(schedulesData.map(s => s.versionName || 'Mặc định'))).sort().reverse();
+      setVersions(uniqueVersions);
+      if (uniqueVersions.length > 0 && !selectedVersion) {
+        setSelectedVersion(uniqueVersions[0]); // Mặc định chọn bản mới nhất
+      }
+
+      let allowedTeachers = teachersData;
       if (role !== 'admin' && role !== 'manager') {
         if (!isOrphanTeacher) {
-          allowedTeachers = allTeachers.filter(t => t.group === department);
+          allowedTeachers = teachersData.filter(t => t.group === department);
         } else {
           allowedTeachers = [];
         }
       }
       
       const sortedTeachers = allowedTeachers.sort((a, b) => {
-          // BÔI ĐẬM NGƯỜI ĐANG ĐĂNG NHẬP (LÊN ĐẦU DANH SÁCH TỔ)
           if ((role !== 'admin' && role !== 'manager') && teacherName) {
               if (a.name === teacherName) return -1;
               if (b.name === teacherName) return 1;
           }
-          
           const nameA = a.name.split(' ').pop() || '';
           const nameB = b.name.split(' ').pop() || '';
           return nameA.localeCompare(nameB, 'vi');
@@ -53,7 +59,11 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
     fetchData();
   }, [role, department, teacherName, isOrphanTeacher]);
 
-  // PHÉP THUẬT AUTO-LOAD: TỰ ĐỘNG BẬT TKB CỦA BẢN THÂN
+  // 🔥 LỌC LỊCH DẠY THEO PHIÊN BẢN ĐÃ CHỌN
+  const schedules = useMemo(() => {
+    return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
+  }, [allSchedules, selectedVersion]);
+
   useEffect(() => {
     if ((role !== 'admin' && role !== 'manager') && teacherName && teachers.length > 0 && !hasAutoLoaded) {
       const exists = teachers.some(t => t.name === teacherName);
@@ -77,21 +87,20 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
     return map;
   }, [schedules]);
 
+  // 🔥 CHỈ HIỆN NHỮNG GIÁO VIÊN CÓ LỊCH TRONG PHIÊN BẢN NÀY (Hoặc hiện tất cả nếu là Admin/Manager)
   const filteredTeachers = teachers.filter(t => {
+    const hasScheduleInVersion = schedules.some(s => s.giao_vien === t.name);
+    if (!hasScheduleInVersion && role !== 'admin' && role !== 'manager') return false;
+
     const matchName = t.name.toLowerCase().includes(searchName.toLowerCase());
     const matchSubject = filterSubject ? t.subject.split(', ').includes(filterSubject) : true;
     const matchGroup = filterGroup ? t.group === filterGroup : true;
     
     let matchSession = true;
     const sessions = teacherSessions.get(t.name) || { sang: false, chieu: false };
-
-    if (filterSession === 'Sáng') {
-      matchSession = sessions.sang && !sessions.chieu; 
-    } else if (filterSession === 'Chiều') {
-      matchSession = !sessions.sang && sessions.chieu; 
-    } else if (filterSession === 'Cả ngày') {
-      matchSession = sessions.sang && sessions.chieu;  
-    }
+    if (filterSession === 'Sáng') matchSession = sessions.sang && !sessions.chieu; 
+    else if (filterSession === 'Chiều') matchSession = !sessions.sang && sessions.chieu; 
+    else if (filterSession === 'Cả ngày') matchSession = sessions.sang && sessions.chieu;  
 
     return matchName && matchSubject && matchGroup && matchSession;
   });
@@ -106,15 +115,9 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
     return groups;
   }, [filteredTeachers]);
 
-  const getScheduleForTeacher = (teacherName: string) => {
-    return schedules.filter(s => s.giao_vien === teacherName);
-  };
-
   const renderScheduleGrid = (teacherSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
-
     let rowDefs: { tiet: number, buoi: 'Sáng' | 'Chiều' }[] = [];
-    
     if (filterSession === 'Sáng' || filterSession === '' || filterSession === 'Cả ngày') {
       for (let i = 1; i <= 5; i++) rowDefs.push({ tiet: i, buoi: 'Sáng' });
     }
@@ -129,37 +132,27 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Tiết \ Thứ</th>
               {days.map(day => (
-                <th key={day} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-r">
-                  Thứ {day}
-                </th>
+                <th key={day} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Thứ {day}</th>
               ))}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {rowDefs.map((row) => (
               <tr key={`${row.buoi}-${row.tiet}`} className={row.buoi === 'Sáng' && row.tiet === 5 && (filterSession === '' || filterSession === 'Cả ngày') ? 'border-b-4 border-gray-300' : ''}>
-                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 border-r bg-gray-50">
-                  Tiết {row.tiet} ({row.buoi})
-                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 border-r bg-gray-50">Tiết {row.tiet} ({row.buoi})</td>
                 {days.map(day => {
                   const slot = teacherSchedules.find(s => s.thu === day && s.tiet === row.tiet && s.buoi === row.buoi);
-                  
-                  // 🔥 LOGIC DIỆT CHỮ P MỚI: Cạo sạch khoảng trắng, ép về chữ thường để so sánh
                   const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
                   const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
-
                   return (
                     <td key={`${day}-${row.buoi}-${row.tiet}`} className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r ${slot ? 'bg-indigo-50' : 'bg-gray-100/50'}`}>
                       {slot ? (
                         <div className="flex flex-col items-center">
                           <span className="font-bold text-indigo-700">{slot.lop}</span>
                           <span className="text-xs text-gray-600">{slot.mon}</span>
-                          {/* 🔥 CHỈ HIỆN P. KHI THẬT SỰ CÓ SỐ PHÒNG SAU KHI ĐÃ CẠO SẠCH KHOẢNG TRẮNG */}
                           {hasRoom && <span className="text-xs text-gray-500">P.{cleanPhong}</span>}
                         </div>
-                      ) : (
-                        <span className="text-gray-400 text-xs italic">Trống</span>
-                      )}
+                      ) : <span className="text-gray-400 text-xs italic">Trống</span>}
                     </td>
                   );
                 })}
@@ -171,18 +164,15 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
     );
   };
 
-  const displayDepartment = isOrphanTeacher ? '(Chưa phân công)' : department;
-
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="flex justify-between items-center mb-6 border-b pb-4 border-gray-100">
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center mb-6 border-b pb-4 border-gray-100 gap-4">
             <div>
               <h2 className="text-2xl font-bold text-gray-800 flex items-center">
                 <Calendar className="mr-2 text-indigo-600" /> Tra cứu Thời khóa biểu
               </h2>
               <p className="text-gray-500 text-sm mt-1">
-                {/* 🔥 BỔ SUNG TEXT CHO BGH */}
                 {(role === 'admin' || role === 'manager') 
                   ? 'Tra cứu Thời khóa biểu của toàn bộ giáo viên trường.' 
                   : isOrphanTeacher 
@@ -192,8 +182,22 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
                       : `Tra cứu Thời khóa biểu của giáo viên trong Tổ ${displayDepartment}.`}
               </p>
             </div>
-            <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-semibold text-sm border border-indigo-100">
-                Tổng số: {filteredTeachers.length} Giáo viên
+            
+            {/* 🔥 BỘ CHỌN PHIÊN BẢN TKB */}
+            <div className="flex items-center bg-indigo-50 p-2 rounded-xl border border-indigo-100 shadow-sm">
+              <span className="text-indigo-700 font-bold text-sm mr-3 flex items-center shrink-0">
+                Phiên bản:
+              </span>
+              <select 
+                className="bg-white border-none rounded-lg text-sm font-bold text-gray-800 focus:ring-2 focus:ring-indigo-500 py-1.5 px-3 min-w-[150px]"
+                value={selectedVersion}
+                onChange={(e) => {
+                  setSelectedVersion(e.target.value);
+                  setSelectedTeacher(null); // Reset lại khi đổi phiên bản
+                }}
+              >
+                {versions.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
             </div>
         </div>
         
@@ -203,7 +207,7 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
             <input
               type="text"
               placeholder="Tìm tên giáo viên..."
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100"
               value={searchName}
               onChange={(e) => setSearchName(e.target.value)}
               disabled={isOrphanTeacher}
@@ -222,7 +226,6 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
             ))}
           </select>
 
-          {/* 🔥 CHO PHÉP BGH XEM VÀ LỌC THEO TỔ */}
           {(role === 'admin' || role === 'manager') && (
             <select
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
@@ -252,7 +255,6 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
           </select>
         </div>
 
-        {/* CẢNH BÁO CHO GV NẾU CHƯA CÓ TỔ HOẶC CHƯA LIÊN KẾT TÊN TKB */}
         {(isOrphanTeacher || isMissingLink) ? (
           <div className="flex flex-col items-center justify-center py-16 bg-yellow-50 rounded-xl border border-dashed border-yellow-300">
              <AlertCircle className="w-16 h-16 text-yellow-500 mb-4" />
@@ -263,7 +265,6 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
              </p>
           </div>
         ) : (
-          /* DANH SÁCH GIÁO VIÊN BÌNH THƯỜNG */
           !selectedTeacher && (
             <div className="space-y-8 animate-in fade-in">
               {Object.keys(groupedTeachers).sort().map((groupName) => (
@@ -289,9 +290,7 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-100">
                               {groupedTeachers[groupName].map((teacher, index) => {
-                                  // 🔥 BỎ ĐÁNH DẤU "Bạn" NẾU LÀ ADMIN HOẶC MANAGER
                                   const isCurrentUser = (role !== 'admin' && role !== 'manager') && teacherName === teacher.name;
-                                  
                                   return (
                                     <tr 
                                         key={teacher.name} 
@@ -300,9 +299,7 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
                                           isCurrentUser ? 'bg-indigo-50/80 hover:bg-indigo-100' : 'hover:bg-indigo-50/50'
                                         }`}
                                     >
-                                        <td className={`px-6 py-3 text-sm text-center border-r ${isCurrentUser ? 'text-indigo-800 font-bold' : 'text-gray-500 font-medium'}`}>
-                                          {index + 1}
-                                        </td>
+                                        <td className={`px-6 py-3 text-sm text-center border-r ${isCurrentUser ? 'text-indigo-800 font-bold' : 'text-gray-500 font-medium'}`}>{index + 1}</td>
                                         <td className={`px-6 py-3 text-sm border-r flex items-center ${isCurrentUser ? 'font-bold text-indigo-800' : 'font-semibold text-indigo-700'}`}>
                                           {teacher.name}
                                           {isCurrentUser && <span className="ml-2 bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded-full">Bạn</span>}
@@ -320,30 +317,27 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
                   </div>
                 </div>
               ))}
-              
               {filteredTeachers.length === 0 && !isOrphanTeacher && (
                 <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-                  Không tìm thấy giáo viên nào phù hợp với bộ lọc hiện tại.
+                  Không tìm thấy giáo viên hoặc giáo viên không có lịch dạy trong phiên bản "{selectedVersion}".
                 </div>
               )}
             </div>
           )
         )}
 
-        {/* XEM CHI TIẾT TKB CỦA GIÁO VIÊN */}
         {selectedTeacher && !isOrphanTeacher && !isMissingLink && (
           <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-indigo-700">TKB: {selectedTeacher}</h3>
+              <h3 className="text-xl font-bold text-indigo-700">TKB: {selectedTeacher} ({selectedVersion})</h3>
               <button 
                 onClick={() => setSelectedTeacher(null)}
                 className="text-sm text-white bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors font-medium"
               >
-                {/* ĐỔI TEXT NÚT QUAY LẠI CHO HỢP LÝ VỚI BGH */}
                 {(role === 'admin' || role === 'manager') ? '← Trở lại danh sách' : '← Xem TKB người khác trong Tổ'}
               </button>
             </div>
-            {renderScheduleGrid(getScheduleForTeacher(selectedTeacher))}
+            {renderScheduleGrid(schedules.filter(s => s.giao_vien === selectedTeacher))}
           </div>
         )}
       </div>

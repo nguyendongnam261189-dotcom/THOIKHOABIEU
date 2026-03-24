@@ -11,6 +11,8 @@ import { ClassView } from './pages/ClassView';
 import { SubstituteTeacher } from './pages/SubstituteTeacher';
 import { TeacherManagement } from './pages/TeacherManagement';
 import { UserManagement } from './pages/UserManagement';
+// 🔥 IMPORT THÊM FILE DASHBOARD MỚI TẠO
+import { Dashboard } from './pages/Dashboard'; 
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2, Clock, XCircle } from 'lucide-react';
 import { ZaloWarning } from './components/ZaloWarning';
@@ -159,6 +161,13 @@ const App: React.FC = () => {
               path="users" 
               element={role === 'admin' ? <UserManagement /> : <Navigate to="/" />} 
             />
+
+            {/* 🔥 ROUTE MỚI CHO TRANG THỐNG KÊ (Dành cho Admin và Manager) */}
+            <Route 
+              path="dashboard" 
+              element={(role === 'admin' || role === 'manager') ? <Dashboard /> : <Navigate to="/" />} 
+            />
+
             <Route 
               path="substitute" 
               element={(role === 'admin' || role === 'ttcm') ? <SubstituteTeacher role={role} department={department} /> : <Navigate to="/" />} 

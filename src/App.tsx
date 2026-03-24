@@ -13,6 +13,7 @@ import { TeacherManagement } from './pages/TeacherManagement';
 import { UserManagement } from './pages/UserManagement';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2, Clock, XCircle } from 'lucide-react';
+import { ZaloWarning } from './components/ZaloWarning';
 
 const PendingApproval = () => (
   <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">

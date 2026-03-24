@@ -144,13 +144,18 @@ export const TeacherView: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 't
                 {days.map(day => {
                   const slot = teacherSchedules.find(s => s.thu === day && s.tiet === row.tiet && s.buoi === row.buoi);
                   
+                  // 🔥 LOGIC DIỆT CHỮ P MỚI: Cạo sạch khoảng trắng, ép về chữ thường để so sánh
+                  const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
+                  const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
+
                   return (
                     <td key={`${day}-${row.buoi}-${row.tiet}`} className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r ${slot ? 'bg-indigo-50' : 'bg-gray-100/50'}`}>
                       {slot ? (
                         <div className="flex flex-col items-center">
                           <span className="font-bold text-indigo-700">{slot.lop}</span>
                           <span className="text-xs text-gray-600">{slot.mon}</span>
-                          <span className="text-xs text-gray-500">P.{slot.phong}</span>
+                          {/* 🔥 CHỈ HIỆN P. KHI THẬT SỰ CÓ SỐ PHÒNG SAU KHI ĐÃ CẠO SẠCH KHOẢNG TRẮNG */}
+                          {hasRoom && <span className="text-xs text-gray-500">P.{cleanPhong}</span>}
                         </div>
                       ) : (
                         <span className="text-gray-400 text-xs italic">Trống</span>

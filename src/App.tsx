@@ -55,6 +55,7 @@ const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<'admin' | 'teacher' | 'ttcm' | null>(null);
   const [department, setDepartment] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState<string | null>(null); // THÊM STATE LƯU TÊN GIÁO VIÊN
   const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -84,23 +85,27 @@ const App: React.FC = () => {
             // LẤY 100% QUYỀN VÀ TRẠNG THÁI TỪ FIREBASE
             setRole(data.role as 'admin' | 'teacher' | 'ttcm');
             setDepartment(data.department || null);
+            setTeacherName(data.teacherName || null); // ĐỌC TÊN GIÁO VIÊN TỪ FIREBASE
             setStatus(data.status || 'pending');
           } else {
             // Lần đầu tiên đăng nhập chưa có record trong Database
             setRole('teacher');
             setDepartment(null);
+            setTeacherName(null);
             setStatus('pending');
           }
         } catch (error) {
           console.error("Error fetching user role:", error);
           setRole('teacher');
           setDepartment(null);
+          setTeacherName(null);
           setStatus('pending');
         }
       } else {
         setUser(null);
         setRole(null);
         setDepartment(null);
+        setTeacherName(null);
         setStatus(null);
       }
       setLoading(false);
@@ -127,12 +132,16 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
+      {/* Gọi component chặn Zalo đã được import ở trên */}
+      <ZaloWarning /> 
+      
       <Router>
         <Routes>
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
           
           <Route path="/" element={user ? <Layout role={role} /> : <Navigate to="/login" />}>
-            <Route index element={<TeacherView role={role} department={department} />} />
+            {/* TRUYỀN THÊM BIẾN teacherName VÀO TRANG XEM TKB */}
+            <Route index element={<TeacherView role={role} department={department} teacherName={teacherName} />} />
             <Route path="class" element={<ClassView />} />
             
             {/* Admin Routes */}

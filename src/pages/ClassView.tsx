@@ -156,6 +156,7 @@ export const ClassView: React.FC = () => {
           </select>
         </div>
 
+        {/* 🔥 DANH SÁCH LỚP: HIỂN THỊ DẤU GẠCH CHÉO TỰ ĐỘNG */}
         {!selectedClass && (
           <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-3">
             {filteredClasses.map(className => (
@@ -164,7 +165,7 @@ export const ClassView: React.FC = () => {
                 onClick={() => setSelectedClass(className)}
                 className="p-3 text-sm font-semibold text-gray-800 border border-gray-200 rounded-lg hover:bg-emerald-50 hover:border-emerald-300 transition-colors text-center"
               >
-                {className}
+                {String(className).replace(/\./g, '/')}
               </button>
             ))}
             {filteredClasses.length === 0 && (
@@ -175,10 +176,13 @@ export const ClassView: React.FC = () => {
           </div>
         )}
 
+        {/* 🔥 CHI TIẾT TKB LỚP: HIỂN THỊ DẤU GẠCH CHÉO TỰ ĐỘNG TRÊN TIÊU ĐỀ */}
         {selectedClass && (
           <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-emerald-700">TKB Lớp: {selectedClass} ({selectedVersion})</h3>
+              <h3 className="text-xl font-bold text-emerald-700">
+                TKB Lớp: {String(selectedClass).replace(/\./g, '/')} ({selectedVersion})
+              </h3>
               <button 
                 onClick={() => setSelectedClass(null)}
                 className="text-sm text-white bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors font-medium"

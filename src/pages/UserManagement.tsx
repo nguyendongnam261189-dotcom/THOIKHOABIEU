@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
-import { collection, getDocs, doc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Users, Save, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
-  // TẠO THÊM STATE ĐỂ LƯU BẢN GỐC (Dùng để so sánh xem ai bị thay đổi)
   const [originalUsers, setOriginalUsers] = useState<User[]>([]);
   
   const [loading, setLoading] = useState(true);
@@ -40,7 +39,6 @@ export const UserManagement: React.FC = () => {
         });
         
         setUsers(usersData);
-        // Lưu lại một bản sao chép y hệt bản gốc lúc mới tải về
         setOriginalUsers(JSON.parse(JSON.stringify(usersData)));
       } catch (error) {
         console.error("Error fetching users:", error);
@@ -77,11 +75,9 @@ export const UserManagement: React.FC = () => {
     setSaving(true);
     setStatus(null);
     try {
-      // 1. TẠO GÓI HÀNG (BATCH) CỦA FIREBASE
-      const batch = writeBatch(db);
+      const updatePromises: Promise<void>[] = [];
       let changedCount = 0;
 
-      // 2. SO SÁNH: CHỈ TÌM NHỮNG NGƯỜI BỊ THAY ĐỔI
       users.forEach(user => {
         const originalUser = originalUsers.find(u => u.uid === user.uid);
         
@@ -92,35 +88,42 @@ export const UserManagement: React.FC = () => {
 
         if (isChanged) {
           const userRef = doc(db, 'users', user.uid);
-          // Đóng gói lệnh cập nhật vào Batch thay vì gửi luôn
-          batch.update(userRef, {
-            role: user.role,
-            department: user.department || null,
-            status: user.status || 'approved'
-          });
+          // Gom lệnh thay đổi vào danh sách chờ
+          updatePromises.push(
+            updateDoc(userRef, {
+              role: user.role,
+              department: user.department || null,
+              status: user.status || 'approved'
+            })
+          );
           changedCount++;
         }
       });
 
-      // 3. NẾU KHÔNG CÓ AI THAY ĐỔI THÌ BÁO LUÔN, KHÔNG CẦN GỌI LÊN MÁY CHỦ
+      // Nếu không ai bị thay đổi, báo luôn
       if (changedCount === 0) {
         setStatus({ type: 'success', message: 'Không có thay đổi nào mới cần lưu.' });
         setSaving(false);
         return;
       }
 
-      // 4. GỬI 1 LẦN DUY NHẤT LÊN FIREBASE
-      await batch.commit();
+      // 🕒 TẠO BỘ ĐẾM GIỜ (TIMEOUT) CHỐNG TREO MẠNG
+      const timeoutPromise = new Promise<void>((_, reject) => 
+        setTimeout(() => reject(new Error("Quá thời gian kết nối (10s). Mạng có thể đang yếu, vui lòng thử lại!")), 10000)
+      );
+
+      // Chạy đua giữa việc Firebase lưu dữ liệu và Bộ đếm giờ (cái nào đến trước thì chạy)
+      await Promise.race([Promise.all(updatePromises), timeoutPromise]);
       
-      // Cập nhật lại bản gốc để dùng cho lần lưu tiếp theo
+      // Thành công thì cập nhật lại bản gốc
       setOriginalUsers(JSON.parse(JSON.stringify(users)));
       setStatus({ type: 'success', message: `Đã lưu thành công phân quyền cho ${changedCount} người dùng!` });
       
     } catch (error: any) {
       console.error("Error updating users:", error);
-      setStatus({ type: 'error', message: `Lỗi khi lưu: ${error.message}` });
+      setStatus({ type: 'error', message: `${error.message}` });
     } finally {
-      setSaving(false);
+      setSaving(false); // Đảm bảo vòng quay luôn bị tắt
     }
   };
 
@@ -175,7 +178,6 @@ export const UserManagement: React.FC = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {users.map(user => {
-                // Đánh dấu dòng nào bị thay đổi để Admin dễ nhìn
                 const originalUser = originalUsers.find(u => u.uid === user.uid);
                 const isChanged = originalUser && (
                   originalUser.role !== user.role || 
@@ -184,7 +186,7 @@ export const UserManagement: React.FC = () => {
                 );
 
                 return (
-                  <tr key={user.uid} className={isChanged ? "bg-yellow-50/50" : ""}>
+                  <tr key={user.uid} className={isChanged ? "bg-yellow-50/50 transition-colors" : "transition-colors"}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{user.email}</div>
                     </td>

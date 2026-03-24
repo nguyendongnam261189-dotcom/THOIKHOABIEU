@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2, ShieldAlert } from 'lucide-react';
+import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2, ShieldAlert, Layers } from 'lucide-react';
 import { normalizeSubjectName } from '../utils/subjectUtils';
 import { toBlob } from 'html-to-image'; 
 
@@ -28,7 +28,7 @@ interface ActiveSlot {
 }
 
 export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' | null, department?: string | null }> = ({ role, department }) => {
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   
   const [selectedAbsentTeachers, setSelectedAbsentTeachers] = useState<string[]>([]);
@@ -42,6 +42,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [isExporting, setIsExporting] = useState(false);
   const [exportTitle, setExportTitle] = useState('PHÂN CÔNG DẠY THAY');
   
+  // 🔥 STATES CHO ĐA PHIÊN BẢN
+  const [versions, setVersions] = useState<string[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<string>('');
+
   const getDefaultDateString = () => {
     const today = new Date();
     const day = today.getDate().toString().padStart(2, '0');
@@ -58,7 +62,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
-  // CHẶN TÀI KHOẢN GIÁO VIÊN
   const isTeacherRole = role === 'teacher';
 
   useEffect(() => {
@@ -70,17 +73,22 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     if (isTeacherRole) return;
 
     const fetchData = async () => {
-      const allSchedules = await scheduleService.getAllSchedules();
+      const schedulesData = await scheduleService.getAllSchedules();
       const allTeachers = await teacherService.getAllTeachers();
-      setSchedules(allSchedules);
+      setAllSchedules(schedulesData);
       
-      // PHÂN QUYỀN: Cắt gọn danh sách GV theo Tổ nếu là TTCM
+      // 🔥 TRÍCH XUẤT PHIÊN BẢN
+      const uniqueVersions = Array.from(new Set(schedulesData.map(s => s.versionName || 'Mặc định'))).sort().reverse();
+      setVersions(uniqueVersions);
+      if (uniqueVersions.length > 0 && !selectedVersion) {
+        setSelectedVersion(uniqueVersions[0]);
+      }
+
       let allowedTeachers = allTeachers;
       if (role !== 'admin' && department) {
         allowedTeachers = allTeachers.filter(t => t.group === department);
       }
 
-      // SẮP XẾP THEO ALPHABET ĐỂ DỄ TÌM KIẾM TRÊN ĐIỆN THOẠI
       const sortedTeachers = allowedTeachers.sort((a, b) => {
           const nameA = a.name.split(' ').pop() || '';
           const nameB = b.name.split(' ').pop() || '';
@@ -91,6 +99,11 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     };
     fetchData();
   }, [isTeacherRole, role, department]);
+
+  // 🔥 LỌC LỊCH THEO PHIÊN BẢN ĐÃ CHỌN
+  const schedules = useMemo(() => {
+    return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
+  }, [allSchedules, selectedVersion]);
 
   if (isTeacherRole) {
     return (
@@ -316,11 +329,15 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                         <td key={day} className={cellClass}>
                           {slot ? (
                             <div className="font-medium text-[11px] leading-tight" title={`${slot.lop} (${slot.mon})`}>
-                              {slot.lop}
+                              {/* 🔥 HIỂN THỊ LỚP: Đổi . thành / */}
+                              {String(slot.lop).replace(/\./g, '/')}
                             </div>
                           ) : isTargetSlot ? (
                             <div className="font-bold text-red-600 text-[10px] leading-tight flex flex-col items-center justify-center" title={`Dạy thay lớp ${activeSlot.className}`}>
-                              <span className="bg-red-100 text-red-700 px-1 rounded border border-red-200 whitespace-nowrap">{activeSlot.className}</span>
+                              {/* 🔥 HIỂN THỊ LỚP: Đổi . thành / */}
+                              <span className="bg-red-100 text-red-700 px-1 rounded border border-red-200 whitespace-nowrap">
+                                {String(activeSlot.className).replace(/\./g, '/')}
+                              </span>
                             </div>
                           ) : (
                             <span className="opacity-30">-</span>
@@ -393,7 +410,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                           }}>
                         {slot ? (
                           <div className="flex flex-col items-center text-center">
-                            <span className="font-bold text-indigo-700 text-xs md:text-sm leading-tight">{slot.lop}</span>
+                            {/* 🔥 HIỂN THỊ LỚP: Đổi . thành / */}
+                            <span className="font-bold text-indigo-700 text-xs md:text-sm leading-tight">
+                                {String(slot.lop).replace(/\./g, '/')}
+                            </span>
                             <span className="text-[10px] md:text-xs text-gray-600 leading-tight">{slot.mon}</span>
                             {assignment && (
                               <span className="mt-1 px-1 py-0.5 bg-green-100 text-green-800 text-[10px] md:text-xs rounded font-medium border border-green-200 shadow-sm whitespace-nowrap overflow-hidden text-ellipsis max-w-[50px] md:max-w-full">
@@ -423,7 +443,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                ← Trở lại thiết lập
              </button>
              
-             {/* THANH CÔNG CỤ XUẤT ẢNH THÔNG MINH */}
              <div className="flex gap-2 flex-wrap bg-gray-50 p-2 rounded-lg border border-gray-200">
                {!generatedBlob ? (
                  <button 
@@ -517,7 +536,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                          <td className="border border-gray-800 p-2 text-center">{idx + 1}</td>
                          <td className="border border-gray-800 p-2 font-medium whitespace-nowrap">{a.absentTeacher}</td>
                          <td className="border border-gray-800 p-2 font-bold text-indigo-700 whitespace-nowrap">{a.substituteTeacher}</td>
-                         <td className="border border-gray-800 p-2 text-center font-medium whitespace-nowrap">{a.className}</td>
+                         <td className="border border-gray-800 p-2 text-center font-medium whitespace-nowrap">
+                           {/* 🔥 XUẤT ẢNH BÁO CÁO: Đổi . thành / */}
+                           {String(a.className).replace(/\./g, '/')}
+                         </td>
                          <td className="border border-gray-800 p-2 text-center">{a.day}</td>
                          <td className="border border-gray-800 p-2 text-center">{a.session}</td>
                          <td className="border border-gray-800 p-2 text-center">{a.period}</td>
@@ -532,7 +554,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
            </div>
         </div>
 
-        {/* MODAL XEM TRƯỚC ẢNH KHI TRÌNH DUYỆT CHẶN COPY */}
         {previewImage && (
           <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
             <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
@@ -584,15 +605,38 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     <div className="space-y-4 md:space-y-6 max-w-6xl mx-auto">
       <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6 gap-3">
-          <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center">
-            <Users className="mr-2 text-indigo-600 w-6 h-6 md:w-8 md:h-8" /> Phân công Dạy thay
-          </h2>
-          <button
-            onClick={() => setIsExporting(true)}
-            className="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg flex justify-center items-center shadow-sm font-medium transition-colors"
-          >
-            Xuất kết quả ({Object.keys(assignments).length})
-          </button>
+          <div>
+            <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center">
+              <Users className="mr-2 text-indigo-600 w-6 h-6 md:w-8 md:h-8" /> Phân công Dạy thay
+            </h2>
+            <p className="text-sm text-gray-500 mt-1 italic">Vui lòng chọn đúng phiên bản TKB đang áp dụng.</p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            {/* 🔥 BỘ CHỌN PHIÊN BẢN CHO DẠY THAY */}
+            <div className="flex items-center bg-indigo-50 p-2 rounded-xl border border-indigo-100 shadow-sm w-full sm:w-auto">
+                <span className="text-indigo-700 font-bold text-xs mr-2 flex items-center shrink-0">
+                    <Layers className="w-4 h-4 mr-1" /> Bản:
+                </span>
+                <select 
+                    className="bg-white border-none rounded-lg text-sm font-bold text-gray-800 focus:ring-2 focus:ring-indigo-500 py-1.5 px-3 min-w-[120px] md:min-w-[180px]"
+                    value={selectedVersion}
+                    onChange={(e) => {
+                        setSelectedVersion(e.target.value);
+                        setAssignments({}); // Reset khi đổi phiên bản
+                    }}
+                >
+                    {versions.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+            </div>
+
+            <button
+                onClick={() => setIsExporting(true)}
+                className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg flex justify-center items-center shadow-sm font-medium transition-colors"
+            >
+                Xuất kết quả ({Object.keys(assignments).length})
+            </button>
+          </div>
         </div>
 
         <div className="mb-4 md:mb-8">
@@ -640,7 +684,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                   Phân công: <span className="text-indigo-600">{activeSlot.absentTeacher}</span>
                 </h3>
                 <p className="text-xs md:text-sm text-gray-600 mt-1">
-                  Thứ {activeSlot.day} - Tiết {activeSlot.period} ({activeSlot.session}) | Lớp <span className="font-bold">{activeSlot.className}</span> - Môn <span className="font-bold">{activeSlot.subject}</span>
+                  Thứ {activeSlot.day} - Tiết {activeSlot.period} ({activeSlot.session}) | Lớp <span className="font-bold">{activeSlot.className.replace(/\./g, '/')}</span> - Môn <span className="font-bold">{activeSlot.subject}</span>
                 </p>
               </div>
               <button 
@@ -655,9 +699,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
             </div>
             
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative bg-white">
-              
-              {/* === BẢNG TRÁI: DANH SÁCH GIÁO VIÊN GỢI Ý === */}
-              {/* Trên Mobile: Sẽ ẩn nếu ĐÃ CHỌN 1 giáo viên để xem trước */}
               <div className={`w-full md:w-1/2 p-4 md:p-6 overflow-y-auto border-r-0 md:border-r border-gray-200 bg-white ${selectedSub ? 'hidden md:block' : 'block'}`}>
                 {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`] && (
                   <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm gap-3">
@@ -691,7 +732,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                   <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start">
                     <AlertCircle className="h-5 w-5 text-yellow-500 mr-2 flex-shrink-0 mt-0.5" />
                     <p className="text-sm text-yellow-700">
-                      Không tìm thấy giáo viên nào rảnh vào tiết này.
+                      Không tìm thấy giáo viên nào rảnh vào tiết này trong phiên bản "{selectedVersion}".
                     </p>
                   </div>
                 ) : (
@@ -729,11 +770,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                 )}
               </div>
 
-              {/* === BẢNG PHẢI: XEM TRƯỚC TKB & XÁC NHẬN CHỌN === */}
-              {/* Trên Mobile: Chỉ hiện ra khi ĐÃ CHỌN 1 giáo viên */}
               <div className={`w-full md:w-1/2 p-4 md:p-6 overflow-y-auto bg-gray-50 flex-col ${selectedSub ? 'flex' : 'hidden md:flex'}`}>
-                
-                {/* Nút Quay Lại Cực To Dành Riêng Cho Mobile */}
                 {selectedSub && (
                   <button 
                     onClick={() => setSelectedSub(null)}

@@ -130,99 +130,106 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // 🔥 HÀM XUẤT BÁO CÁO CẢI TIẾN: ĐỊNH DẠNG ĐẸP + MULTI-SHEETS
   const exportIntegratedReport = () => {
-    const wb = XLSX.utils.book_new();
-    const ktLopSet = new Set(selectedKTLops);
-    const summaryData: any[] = [];
-    const depts = Array.from(new Set(teachers.map(t => t.group || 'Chung'))).sort();
+    try {
+      const wb = XLSX.utils.book_new();
+      const ktLopSet = new Set(selectedKTLops);
+      const summaryData: any[] = [];
+      const depts = Array.from(new Set(teachers.map(t => t.group || 'Chung'))).sort();
 
-    let grandTotal = 0;
+      let grandTotal = 0;
 
-    depts.forEach(dept => {
-      const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
-      const rows: any[] = [];
-      let deptTotal = 0;
+      // 1. TẠO CÁC SHEET CHO TỪNG TỔ TRƯỚC
+      depts.forEach(dept => {
+        const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
+        const rows: any[] = [];
+        let deptTotal = 0;
 
-      deptTeachers.forEach((teacher, idx) => {
-        let teacherTotalKT = 0;
-        let detailsArr: string[] = [];
-        let classesTaughtSet = new Set<string>();
+        deptTeachers.forEach((teacher) => {
+          let teacherTotalKT = 0;
+          let detailsArr: string[] = [];
+          let classesTaughtSet = new Set<string>();
 
-        versions.forEach(v => {
-          if (v.weeks <= 0) return;
-          const vPeriods = allSchedules.filter(s => 
-            s.versionName === v.name && 
-            s.giao_vien === teacher.name && 
-            s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
-          );
-          
-          if (vPeriods.length > 0) {
-            const subTotal = vPeriods.length * v.weeks;
-            teacherTotalKT += subTotal;
-            const classCountMap: Record<string, number> = {};
-            vPeriods.forEach(p => {
-              p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
-                const cleanLop = ml.replace(/\./g, '/');
-                classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1;
-                classesTaughtSet.add(cleanLop);
+          versions.forEach(v => {
+            if (v.weeks <= 0) return;
+            const vPeriods = allSchedules.filter(s => 
+              s.versionName === v.name && 
+              s.giao_vien === teacher.name && 
+              s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
+            );
+            
+            if (vPeriods.length > 0) {
+              const subTotal = vPeriods.length * v.weeks;
+              teacherTotalKT += subTotal;
+              const classCountMap: Record<string, number> = {};
+              vPeriods.forEach(p => {
+                p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
+                  const cleanLop = ml.replace(/\./g, '/');
+                  classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1;
+                  classesTaughtSet.add(cleanLop);
+                });
               });
+              const classDetailStr = Object.entries(classCountMap).map(([l, c]) => `${c} tiết lớp ${l}`).join(' + ');
+              detailsArr.push(`[${classDetailStr}] x ${v.weeks} tuần (${v.name})`);
+            }
+          });
+
+          if (teacherTotalKT > 0) {
+            rows.push({
+              'STT': rows.length + 1,
+              'Họ và tên': teacher.name,
+              'Lớp dạy': Array.from(classesTaughtSet).join(', '),
+              'Số tiết': teacherTotalKT,
+              'Diễn giải chi tiết': detailsArr.join(' + ') + ` = ${teacherTotalKT} tiết`
             });
-            const classDetailStr = Object.entries(classCountMap).map(([l, c]) => `${c} tiết lớp ${l}`).join(' + ');
-            detailsArr.push(`[${classDetailStr}] x ${v.weeks} tuần (${v.name})`);
+            deptTotal += teacherTotalKT;
           }
         });
 
-        if (teacherTotalKT > 0) {
-          rows.push({
-            'STT': rows.length + 1,
-            'Họ và tên': teacher.name,
-            'Lớp dạy': Array.from(classesTaughtSet).join(', '),
-            'Số tiết': teacherTotalKT,
-            'Diễn giải chi tiết': detailsArr.join(' + ') + ` = ${teacherTotalKT} tiết`
-          });
-          deptTotal += teacherTotalKT;
+        if (rows.length > 0) {
+          summaryData.push({ 'STT': summaryData.length + 1, 'Tổ chuyên môn': dept, 'Tổng số tiết': deptTotal });
+          grandTotal += deptTotal;
+
+          rows.push({ 'STT': '', 'Họ và tên': 'TỔNG CỘNG TỔ', 'Lớp dạy': '', 'Số tiết': deptTotal, 'Diễn giải chi tiết': '' });
+          
+          const ws = XLSX.utils.json_to_sheet([]);
+          XLSX.utils.sheet_add_aoa(ws, [[`BÁO CÁO TIẾT DẠY LỚP KHUYẾT TẬT - TỔ: ${dept.toUpperCase()}`]], { origin: 'A1' });
+          XLSX.utils.sheet_add_json(ws, rows, { origin: 'A3' });
+          ws['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 60 }];
+          XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`);
         }
       });
 
-      if (rows.length > 0) {
-        // Thêm dòng tổng cộng tổ vào sheet tổ
-        rows.push({ 'STT': '', 'Họ và tên': 'TỔNG CỘNG TỔ', 'Lớp dạy': '', 'Số tiết': deptTotal, 'Diễn giải chi tiết': '' });
-        
-        const ws = XLSX.utils.json_to_sheet([]);
-        XLSX.utils.sheet_add_aoa(ws, [[`BÁO CÁO TIẾT DẠY LỚP KHUYẾT TẬT - TỔ: ${dept.toUpperCase()}`]], { origin: 'A1' });
-        XLSX.utils.sheet_add_json(ws, rows, { origin: 'A3' });
+      // 2. TẠO SHEET TỔNG HỢP TOÀN TRƯỜNG VÀ ĐƯA LÊN ĐẦU
+      const summaryRows = [
+        ['BÁO CÁO TỔNG HỢP TIẾT DẠY LỚP KHUYẾT TẬT TOÀN TRƯỜNG'],
+        [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}`],
+        [],
+        ['STT', 'Tổ chuyên môn', 'Tổng số tiết']
+      ];
+      summaryData.forEach(item => summaryRows.push([item.STT, item['Tổ chuyên môn'], item['Tổng số tiết']]));
+      summaryRows.push(['', 'TỔNG CỘNG TOÀN TRƯỜNG', grandTotal]);
 
-        // Căn chỉnh độ rộng cột
-        ws['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 60 }];
-        XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`);
-        
-        // Lưu vào data tổng hợp
-        summaryData.push({ 'STT': summaryData.length + 1, 'Tổ chuyên môn': dept, 'Tổng số tiết': deptTotal });
-        grandTotal += deptTotal;
-      }
-    });
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+      wsSummary['!cols'] = [{ wch: 5 }, { wch: 40 }, { wch: 20 }];
+      
+      // Thủ thuật để đưa sheet Tổng hợp lên đầu: Tạo book mới, add summary trước rồi copy các sheet cũ qua
+      const finalWb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(finalWb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG');
+      wb.SheetNames.forEach(name => {
+        XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name);
+      });
 
-    // TẠO SHEET TỔNG HỢP TOÀN TRƯỜNG (CHỈ CÓ TỔ)
-    const summaryRows = [
-      ['BÁO CÁO TỔNG HỢP TIẾT DẠY LỚP KHUYẾT TẬT TOÀN TRƯỜNG'],
-      [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}`],
-      [],
-      ['STT', 'Tổ chuyên môn', 'Tổng số tiết']
-    ];
-    summaryData.forEach(item => summaryRows.push([item.STT, item['Tổ chuyên môn'], item['Tổng số tiết']]));
-    summaryRows.push(['', 'TỔNG CỘNG TOÀN TRƯỜNG', grandTotal]);
-
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-    wsSummary['!cols'] = [{ wch: 5 }, { wch: 40 }, { wch: 20 }];
-    XLSX.utils.book_insert_sheet(wb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG', 0);
-
-    XLSX.writeFile(wb, `Bao_Cao_Che_Do_Khuyet_Tat.xlsx`);
+      XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat.xlsx`);
+    } catch (err) {
+      console.error("Lỗi xuất file:", err);
+      alert("Đã có lỗi xảy ra khi tạo file Excel. Thầy vui lòng thử lại.");
+    }
   };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
-      {/* 1. KHU VỰC UPLOAD */}
+      {/* KHU VỰC UPLOAD */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
           <Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB Mới
@@ -265,10 +272,10 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. QUẢN LÝ PHIÊN BẢN */}
+      {/* QUẢN LÝ PHIÊN BẢN */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
-          <Save className="mr-2 text-amber-500" /> Quản lý Phiên bản & Số tuần dạy thực tế
+          <Save className="mr-2 text-amber-500" /> Quản lý Phiên bản & Số tuần áp dụng
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {versions.map(v => (
@@ -302,7 +309,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. XUẤT BÁO CÁO KHUYẾT TẬT */}
+      {/* XUẤT BÁO CÁO KHUYẾT TẬT */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-emerald-200">
         <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-emerald-800 flex items-center">
@@ -337,10 +344,6 @@ export const AdminDashboard: React.FC = () => {
         >
           <FileSpreadsheet className="mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO ĐỊNH DẠNG ĐẸP
         </button>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] text-gray-500 uppercase font-bold tracking-wider">
-            <div className="flex items-start"><CheckCircle className="w-3 h-3 mr-2 text-emerald-500 shrink-0 mt-0.5" /> File Excel nhiều Sheets chuyên nghiệp</div>
-            <div className="flex items-start"><CheckCircle className="w-3 h-3 mr-2 text-emerald-500 shrink-0 mt-0.5" /> Sheet Tổng hợp toàn trường theo Tổ</div>
-        </div>
       </div>
     </div>
   );

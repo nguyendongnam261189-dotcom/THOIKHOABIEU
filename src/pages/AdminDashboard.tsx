@@ -130,6 +130,7 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // 🔥 HÀM XUẤT BÁO CÁO CẬP NHẬT QUY TẮC GVCN (HĐTN TÍNH 3 TIẾT)
   const exportIntegratedReport = () => {
     try {
       const wb = XLSX.utils.book_new();
@@ -139,7 +140,6 @@ export const AdminDashboard: React.FC = () => {
 
       let grandTotal = 0;
 
-      // 1. TẠO CÁC SHEET CHO TỪNG TỔ TRƯỚC
       depts.forEach(dept => {
         const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
         const rows: any[] = [];
@@ -152,24 +152,57 @@ export const AdminDashboard: React.FC = () => {
 
           versions.forEach(v => {
             if (v.weeks <= 0) return;
-            const vPeriods = allSchedules.filter(s => 
+
+            // 1. Lọc các tiết chuyên môn bình thường (loại trừ các tiết HĐTN để tránh trùng lặp)
+            const vNormalPeriods = allSchedules.filter(s => 
               s.versionName === v.name && 
               s.giao_vien === teacher.name && 
-              s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
+              s.lop.split(', ').some(l => ktLopSet.has(l.trim())) &&
+              !s.mon.toUpperCase().includes('HĐTNHN') && 
+              !s.mon.toUpperCase().includes('CHÀO CỜ') &&
+              !s.mon.toUpperCase().includes('SHL')
             );
-            
-            if (vPeriods.length > 0) {
-              const subTotal = vPeriods.length * v.weeks;
-              teacherTotalKT += subTotal;
-              const classCountMap: Record<string, number> = {};
-              vPeriods.forEach(p => {
-                p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
-                  const cleanLop = ml.replace(/\./g, '/');
-                  classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1;
-                  classesTaughtSet.add(cleanLop);
-                });
+
+            // 2. Kiểm tra xem giáo viên này có phải GVCN của lớp khuyết tật nào không (dựa trên sự xuất hiện của HĐTNHN)
+            const vHDTNPeriods = allSchedules.filter(s => 
+              s.versionName === v.name && 
+              s.giao_vien === teacher.name && 
+              s.lop.split(', ').some(l => ktLopSet.has(l.trim())) &&
+              (s.mon.toUpperCase().includes('HĐTNHN') || s.mon.toUpperCase().includes('CC-HĐTNHN'))
+            );
+
+            // Lấy danh sách các lớp khuyết tật mà GV này làm chủ nhiệm trong phiên bản này
+            const cnClasses = new Set<string>();
+            vHDTNPeriods.forEach(p => {
+              p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => cnClasses.add(ml));
+            });
+
+            const classCountMap: Record<string, number> = {};
+            let subTotalVersion = 0;
+
+            // Cộng tiết chuyên môn
+            vNormalPeriods.forEach(p => {
+              const matchedLops = p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l));
+              matchedLops.forEach(ml => {
+                const cleanLop = ml.replace(/\./g, '/');
+                classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1;
+                classesTaughtSet.add(cleanLop);
+                subTotalVersion += 1;
               });
-              const classDetailStr = Object.entries(classCountMap).map(([l, c]) => `${c} tiết lớp ${l}`).join(' + ');
+            });
+
+            // Cộng 3 tiết HĐTN cố định cho mỗi lớp chủ nhiệm
+            cnClasses.forEach(ml => {
+              const cleanLop = ml.replace(/\./g, '/');
+              classCountMap[`HĐTN lớp ${cleanLop}`] = 3;
+              classesTaughtSet.add(cleanLop);
+              subTotalVersion += 3;
+            });
+
+            if (subTotalVersion > 0) {
+              const totalByWeeks = subTotalVersion * v.weeks;
+              teacherTotalKT += totalByWeeks;
+              const classDetailStr = Object.entries(classCountMap).map(([l, c]) => `${c} tiết ${l}`).join(' + ');
               detailsArr.push(`[${classDetailStr}] x ${v.weeks} tuần (${v.name})`);
             }
           });
@@ -189,18 +222,15 @@ export const AdminDashboard: React.FC = () => {
         if (rows.length > 0) {
           summaryData.push({ 'STT': summaryData.length + 1, 'Tổ chuyên môn': dept, 'Tổng số tiết': deptTotal });
           grandTotal += deptTotal;
-
           rows.push({ 'STT': '', 'Họ và tên': 'TỔNG CỘNG TỔ', 'Lớp dạy': '', 'Số tiết': deptTotal, 'Diễn giải chi tiết': '' });
-          
           const ws = XLSX.utils.json_to_sheet([]);
           XLSX.utils.sheet_add_aoa(ws, [[`BÁO CÁO TIẾT DẠY LỚP KHUYẾT TẬT - TỔ: ${dept.toUpperCase()}`]], { origin: 'A1' });
           XLSX.utils.sheet_add_json(ws, rows, { origin: 'A3' });
-          ws['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 60 }];
+          ws['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 80 }];
           XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`);
         }
       });
 
-      // 2. TẠO SHEET TỔNG HỢP TOÀN TRƯỜNG VÀ ĐƯA LÊN ĐẦU
       const summaryRows = [
         ['BÁO CÁO TỔNG HỢP TIẾT DẠY LỚP KHUYẾT TẬT TOÀN TRƯỜNG'],
         [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}`],
@@ -213,23 +243,20 @@ export const AdminDashboard: React.FC = () => {
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
       wsSummary['!cols'] = [{ wch: 5 }, { wch: 40 }, { wch: 20 }];
       
-      // Thủ thuật để đưa sheet Tổng hợp lên đầu: Tạo book mới, add summary trước rồi copy các sheet cũ qua
       const finalWb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(finalWb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG');
-      wb.SheetNames.forEach(name => {
-        XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name);
-      });
+      wb.SheetNames.forEach(name => XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name));
 
-      XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat.xlsx`);
+      XLSX.writeFile(finalWb, `Bao_Cao_Khuyet_Tat_GVCN_Update.xlsx`);
     } catch (err) {
       console.error("Lỗi xuất file:", err);
-      alert("Đã có lỗi xảy ra khi tạo file Excel. Thầy vui lòng thử lại.");
+      alert("Đã có lỗi xảy ra. Thầy vui lòng thử lại.");
     }
   };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
-      {/* KHU VỰC UPLOAD */}
+      {/* 1. KHU VỰC UPLOAD */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
           <Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB Mới
@@ -239,27 +266,17 @@ export const AdminDashboard: React.FC = () => {
             <span className="text-sm font-bold text-gray-700 flex items-center mb-2">
               <Tag className="w-4 h-4 mr-2" /> Tên phiên bản:
             </span>
-            <input 
-              type="text"
-              placeholder="Ví dụ: TKB Số 8..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              value={versionName}
-              onChange={(e) => setVersionName(e.target.value)}
-            />
+            <input type="text" placeholder="Ví dụ: TKB Số 8..." className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" value={versionName} onChange={(e) => setVersionName(e.target.value)} />
           </label>
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition-colors">
             <FileSpreadsheet className="mx-auto h-10 w-10 text-gray-400 mb-3" />
             <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="hidden" id="file-upload" />
-            <label htmlFor="file-upload" className="cursor-pointer inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm">
-              Chọn file Excel
-            </label>
+            <label htmlFor="file-upload" className="cursor-pointer inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm">Chọn file Excel</label>
             {file && <p className="mt-3 text-sm text-indigo-600 font-medium italic">File: {file.name}</p>}
           </div>
         </div>
         <div className="flex justify-between items-center">
-          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-6 py-2.5 rounded-lg font-bold shadow-md transition-all">
-            {loading ? 'Đang xử lý...' : 'Tải lên hệ thống'}
-          </button>
+          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-6 py-2.5 rounded-lg font-bold shadow-md transition-all">{loading ? 'Đang xử lý...' : 'Tải lên hệ thống'}</button>
           {!showDeleteConfirm ? (
             <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm font-medium underline">Xóa sạch dữ liệu</button>
           ) : (
@@ -272,7 +289,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* QUẢN LÝ PHIÊN BẢN */}
+      {/* 2. QUẢN LÝ PHIÊN BẢN */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center">
           <Save className="mr-2 text-amber-500" /> Quản lý Phiên bản & Số tuần áp dụng
@@ -296,12 +313,7 @@ export const AdminDashboard: React.FC = () => {
               </div>
               <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-gray-100">
                 <span className="text-xs font-medium text-gray-500">Dạy trong:</span>
-                <input 
-                  type="number" 
-                  className="w-16 border-b-2 border-indigo-200 focus:border-indigo-500 outline-none text-center font-bold text-indigo-700" 
-                  defaultValue={v.weeks}
-                  onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)}
-                />
+                <input type="number" className="w-16 border-b-2 border-indigo-200 focus:border-indigo-500 outline-none text-center font-bold text-indigo-700" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
                 <span className="text-xs text-gray-500 italic">tuần</span>
               </div>
             </div>
@@ -309,40 +321,26 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* XUẤT BÁO CÁO KHUYẾT TẬT */}
+      {/* 3. XUẤT BÁO CÁO KHUYẾT TẬT */}
       <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-emerald-200">
         <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-emerald-800 flex items-center">
               <BarChart3 className="mr-2 text-emerald-600" /> Xuất báo cáo Chế độ Khuyết tật
             </h3>
-            <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
-                Đã chọn {selectedKTLops.length} lớp
-            </span>
+            <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">Đã chọn {selectedKTLops.length} lớp</span>
         </div>
-
-        <p className="text-sm text-gray-600 mb-4 italic">Bấm chọn các lớp có học sinh khuyết tật để tính toán:</p>
+        <p className="text-sm text-gray-600 mb-4 italic">Bấm chọn các lớp có học sinh khuyết tật:</p>
         <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl border border-gray-100">
           {allClassNames.map(lop => (
-            <button
-              key={lop}
-              onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                selectedKTLops.includes(lop) 
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'
-              }`}
-            >
+            <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'}`}>
               {lop.replace(/\./g, '/')}
             </button>
           ))}
         </div>
-
-        <button
-          onClick={exportIntegratedReport}
-          disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold flex items-center justify-center shadow-lg transition-all text-lg"
-        >
-          <FileSpreadsheet className="mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO ĐỊNH DẠNG ĐẸP
+        <button onClick={exportIntegratedReport} disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)}
+          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold flex items-center justify-center shadow-lg transition-all text-lg">
+          <FileSpreadsheet className="mr-2 h-6 w-6" /> XUẤT FILE BÁO CÁO CHẾ ĐỘ (CẬP NHẬT QUY TẮC GVCN)
         </button>
       </div>
     </div>

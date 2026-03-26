@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, Plus, BarChart3 } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, Plus, BarChart3, Calendar } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -16,6 +16,7 @@ export const AdminDashboard: React.FC = () => {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [versionConfigs, setVersionConfigs] = useState<any[]>([]);
   const [selectedKTLops, setSelectedKTLops] = useState<string[]>([]);
+  const [totalTermWeeks, setTotalTermWeeks] = useState<number>(18); // Mặc định 18 tuần
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editingVersion, setEditingVersion] = useState<string | null>(null);
@@ -23,14 +24,19 @@ export const AdminDashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [s, t, c] = await Promise.all([
+      const [s, t, c, termCfg] = await Promise.all([
         scheduleService.getAllSchedules(),
         teacherService.getAllTeachers(),
-        scheduleService.getVersionConfigs()
+        scheduleService.getVersionConfigs(),
+        scheduleService.getTermConfig() // Lấy cấu hình học kỳ từ Firebase
       ]);
       setAllSchedules(s);
       setTeachers(t);
       setVersionConfigs(c);
+      if (termCfg) {
+        setTotalTermWeeks(termCfg.totalWeeks || 18);
+        setSelectedKTLops(termCfg.ktLops || []);
+      }
     } catch (error) {
       console.error("Lỗi tải dữ liệu:", error);
     }
@@ -97,6 +103,15 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleSaveTermConfig = async () => {
+    try {
+      await scheduleService.saveTermConfig(totalTermWeeks, selectedKTLops);
+      alert("Đã lưu cấu hình học kỳ và danh sách lớp khuyết tật!");
+    } catch (error) {
+      alert("Lỗi khi lưu cấu hình.");
+    }
+  };
+
   const handleRenameVersion = async (oldName: string, newName: string) => {
     setLoading(true);
     try {
@@ -123,10 +138,6 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  /**
-   * 🔥 HÀM NHẬN DIỆN THÔNG MINH (CỐ ĐỊNH)
-   * Quét toàn diện các từ khóa đặc thù của tiết HĐTN/Chủ nhiệm
-   */
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || 
@@ -154,32 +165,21 @@ export const AdminDashboard: React.FC = () => {
 
           versions.forEach(v => {
             if (v.weeks <= 0) return;
-            
-            // Lọc tất cả tiết GV này dạy tại các lớp Khuyết tật đã chọn
             const vPeriods = allSchedules.filter(s => 
               s.versionName === v.name && 
               s.giao_vien === teacher.name && 
               s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
             );
-
             if (vPeriods.length === 0) return;
-
-            // PHÂN LOẠI THÔNG MINH:
-            // 1. Tìm những lớp mà GV này có dạy tiết HĐTN/SHL/CC (Dấu hiệu của GVCN)
             const classesAsCN = new Set<string>();
             vPeriods.forEach(p => {
               if (isHDTNType(p.mon)) {
                 p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => classesAsCN.add(ml));
               }
             });
-
-            // 2. Tính tiết chuyên môn (Bỏ qua các tiết đã xác định là HĐTN)
             const normalPeriods = vPeriods.filter(p => !isHDTNType(p.mon));
-            
             const classCountMap: Record<string, number> = {};
             let subTotalVersion = 0;
-
-            // Cộng tiết chuyên môn thực tế
             normalPeriods.forEach(p => {
               p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
                 const cleanLop = ml.replace(/\./g, '/');
@@ -188,8 +188,6 @@ export const AdminDashboard: React.FC = () => {
                 subTotalVersion += 1;
               });
             });
-
-            // Cộng 3 tiết định mức cho mỗi lớp chủ nhiệm
             classesAsCN.forEach(ml => {
               const cleanLop = ml.replace(/\./g, '/');
               const key = `HĐTN (CN) lớp ${cleanLop}`;
@@ -197,14 +195,12 @@ export const AdminDashboard: React.FC = () => {
               classesTaughtSet.add(cleanLop);
               subTotalVersion += 3;
             });
-
             if (subTotalVersion > 0) {
               teacherTotalKT += (subTotalVersion * v.weeks);
               const detailStr = Object.entries(classCountMap).map(([l, c]) => `${c}t ${l}`).join(' + ');
               detailsArr.push(`[${detailStr}] x ${v.weeks} tuần`);
             }
           });
-
           if (teacherTotalKT > 0) {
             rows.push({
               'STT': rows.length + 1,
@@ -237,7 +233,7 @@ export const AdminDashboard: React.FC = () => {
       const finalWb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(finalWb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG');
       wb.SheetNames.forEach(name => XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name));
-      XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat_Vinh_Vien.xlsx`);
+      XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat.xlsx`);
     } catch (err) { alert("Lỗi xuất file."); }
   };
 
@@ -271,9 +267,44 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. QUẢN LÝ PHIÊN BẢN */}
+      {/* 2. CẤU HÌNH HỌC KỲ & LỚP KHUYẾT TẬT */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200">
+        <h3 className="text-xl font-bold text-indigo-800 mb-6 flex items-center"><Calendar className="mr-2" /> Cấu hình Học kỳ & Lớp Khuyết tật</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-600">Tổng số tuần của đợt kê khai:</label>
+                <div className="flex items-center gap-3">
+                    <input 
+                        type="number" 
+                        className="w-24 p-2 border rounded-lg text-center font-bold text-indigo-700"
+                        value={totalTermWeeks}
+                        onChange={(e) => setTotalTermWeeks(parseInt(e.target.value) || 0)}
+                    />
+                    <span className="text-sm text-gray-500">tuần</span>
+                </div>
+            </div>
+            <div className="flex items-end">
+                <button onClick={handleSaveTermConfig} className="bg-indigo-700 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-indigo-800 transition-colors">
+                    <Save className="w-4 h-4" /> Lưu cấu hình đợt này
+                </button>
+            </div>
+        </div>
+
+        <p className="text-sm text-gray-600 mb-4 italic font-medium">Bấm chọn các lớp có học sinh khuyết tật (Dữ liệu sẽ dùng chung cho toàn trường):</p>
+        <div className="flex flex-wrap gap-2 mb-4 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl border border-gray-100">
+          {allClassNames.map(lop => (
+            <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-400'}`}>
+              {lop.replace(/\./g, '/')}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. QUẢN LÝ PHIÊN BẢN TKB */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-        <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><Save className="mr-2 text-amber-500" /> Số tuần dạy thực tế</h3>
+        <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><Save className="mr-2 text-amber-500" /> Quản lý TKB & Số tuần dạy thực tế</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {versions.map(v => (
             <div key={v.name} className="p-4 bg-gray-50 rounded-xl border border-gray-200 group">
@@ -286,8 +317,8 @@ export const AdminDashboard: React.FC = () => {
                 <button onClick={() => handleDeleteVersion(v.name)} className="text-red-400 opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
               </div>
               <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-100">
-                <span className="text-xs text-gray-500">Dạy:</span>
-                <input type="number" className="w-16 border-b-2 text-center font-bold text-indigo-700 outline-none" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
+                <span className="text-xs text-gray-500">Dạy trong:</span>
+                <input type="number" className="w-16 border-b-2 text-center font-bold text-indigo-700 outline-none border-indigo-200" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
                 <span className="text-xs text-gray-500">tuần</span>
               </div>
             </div>
@@ -295,20 +326,12 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. XUẤT BÁO CÁO */}
+      {/* 4. XUẤT BÁO CÁO TỔNG HỢP */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-200">
-        <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Chế độ Khuyết tật</h3>
-        <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl">
-          {allClassNames.map(lop => (
-            <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'}`}>
-              {lop.replace(/\./g, '/')}
-            </button>
-          ))}
-        </div>
+        <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Tổng hợp toàn trường</h3>
         <button onClick={exportIntegratedReport} disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)}
           className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg">
-          <FileSpreadsheet className="inline mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO CỐ ĐỊNH (TỰ NHẬN DIỆN GVCN)
+          <FileSpreadsheet className="inline mr-2 h-6 w-6" /> XUẤT BÁO CÁO TỔNG HỢP (DÀNH CHO ADMIN)
         </button>
       </div>
     </div>

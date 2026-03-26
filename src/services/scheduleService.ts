@@ -11,7 +11,143 @@ export const scheduleService = {
     try {
       const q = query(collection(db, COLLECTION_NAME));
       const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));import { collection, doc, getDocs, writeBatch, query, where, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Schedule, OperationType } from '../types';
+import { handleFirestoreError } from './firebaseUtils';
+
+const COLLECTION_NAME = 'schedules';
+const CONFIG_COLLECTION = 'version_configs';
+const TEACHERS_COLLECTION = 'teachers'; // 🔥 Thêm collection giáo viên để xóa sạch
+
+export const scheduleService = {
+  async getAllSchedules(): Promise<Schedule[]> {
+    try {
+      const q = query(collection(db, COLLECTION_NAME));
+      const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
+      return [];
+    }
+  },
+
+  async getSchedulesByTeacher(teacherName: string): Promise<Schedule[]> {
+    try {
+      const q = query(collection(db, COLLECTION_NAME), where('giao_vien', '==', teacherName));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
+      return [];
+    }
+  },
+
+  async saveSchedules(schedules: Schedule[]): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      schedules.forEach(schedule => {
+        const docRef = doc(collection(db, COLLECTION_NAME));
+        batch.set(docRef, schedule);
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+    }
+  },
+
+  async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
+    try {
+      const docRef = doc(db, CONFIG_COLLECTION, versionName);
+      await setDoc(docRef, {
+        versionName,
+        appliedWeeks: weeks,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, CONFIG_COLLECTION);
+      throw error;
+    }
+  },
+
+  async getVersionConfigs(): Promise<any[]> {
+    try {
+      const snapshot = await getDocs(collection(db, CONFIG_COLLECTION));
+      return snapshot.docs.map(doc => doc.data());
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, CONFIG_COLLECTION);
+      return [];
+    }
+  },
+
+  async deleteScheduleByVersion(versionName: string): Promise<void> {
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const batch = writeBatch(db);
+      let count = 0;
+      snapshot.forEach(document => {
+        if ((document.data().versionName || 'Không rõ') === versionName) {
+          batch.delete(document.ref);
+          count++;
+        }
+      });
+      const configRef = doc(db, CONFIG_COLLECTION, versionName);
+      batch.delete(configRef);
+      if (count > 0 || versionName !== 'Không rõ') await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  async renameVersion(oldName: string, newName: string): Promise<void> {
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const batch = writeBatch(db);
+      snapshot.forEach((document) => {
+        if ((document.data().versionName || 'Không rõ') === oldName) {
+          batch.update(document.ref, { versionName: newName });
+        }
+      });
+      const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
+      const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
+      const configs = await this.getVersionConfigs();
+      const oldConfig = configs.find(c => c.versionName === oldName);
+      if (oldConfig) {
+        batch.set(newConfigRef, { ...oldConfig, versionName: newName });
+        batch.delete(oldConfigRef);
+      }
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  /**
+   * 🔥 HÀM XÓA SẠCH 100% DỮ LIỆU (Đã nâng cấp)
+   * Quét sạch: Tiết dạy, Cấu hình tuần và Toàn bộ danh sách giáo viên
+   */
+  async deleteAllSchedules(): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      const [schSnap, cfgSnap, teaSnap] = await Promise.all([
+        getDocs(collection(db, COLLECTION_NAME)),
+        getDocs(collection(db, CONFIG_COLLECTION)),
+        getDocs(collection(db, TEACHERS_COLLECTION))
+      ]);
+
+      schSnap.forEach(doc => batch.delete(doc.ref));
+      cfgSnap.forEach(doc => batch.delete(doc.ref));
+      teaSnap.forEach(doc => batch.delete(doc.ref));
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
+      throw error;
+    }
+  }
+};
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
       return [];

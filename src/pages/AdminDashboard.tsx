@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, Plus, BarChart3, Calendar } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, Plus, BarChart3 } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -16,7 +16,6 @@ export const AdminDashboard: React.FC = () => {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [versionConfigs, setVersionConfigs] = useState<any[]>([]);
   const [selectedKTLops, setSelectedKTLops] = useState<string[]>([]);
-  const [totalTermWeeks, setTotalTermWeeks] = useState<number>(18);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editingVersion, setEditingVersion] = useState<string | null>(null);
@@ -24,22 +23,14 @@ export const AdminDashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-      // 🛡️ Kiểm tra sự tồn tại của các hàm trước khi gọi để tránh treo App
-      const [s, t, c, termCfg] = await Promise.all([
+      const [s, t, c] = await Promise.all([
         scheduleService.getAllSchedules(),
         teacherService.getAllTeachers(),
-        scheduleService.getVersionConfigs(),
-        scheduleService.getTermConfig ? scheduleService.getTermConfig() : Promise.resolve(null)
+        scheduleService.getVersionConfigs()
       ]);
-      
-      setAllSchedules(s || []);
-      setTeachers(t || []);
-      setVersionConfigs(c || []);
-      
-      if (termCfg) {
-        setTotalTermWeeks(termCfg.totalWeeks || 18);
-        setSelectedKTLops(termCfg.ktLops || []);
-      }
+      setAllSchedules(s);
+      setTeachers(t);
+      setVersionConfigs(c);
     } catch (error) {
       console.error("Lỗi tải dữ liệu:", error);
     }
@@ -77,40 +68,23 @@ export const AdminDashboard: React.FC = () => {
 
   const handleUpload = async () => {
     if (!file || !versionName.trim()) {
-      setStatus({ type: 'error', message: 'Vui lòng chọn file và nhập tên phiên bản.' });
+      setStatus({ type: 'error', message: 'Vui lòng chọn file.' });
       return;
     }
     setLoading(true);
     try {
-      const { schedules, teachers: parsedTeachers } = await parseExcelFile(file);
-      
-      // Gắn tên phiên bản vào từng tiết dạy
+      const { schedules, teachers } = await parseExcelFile(file);
       const labeledSchedules = schedules.map(s => ({ ...s, versionName: versionName.trim() }));
-      
-      // 🛡️ Thực hiện lưu trữ tuần tự để đảm bảo tính ổn định
-      await teacherService.saveTeachers(parsedTeachers);
+      await teacherService.saveTeachers(teachers);
       await scheduleService.saveSchedules(labeledSchedules); 
-      
-      setStatus({ type: 'success', message: `Đã tải lên phiên bản ${versionName} thành công!` });
+      setStatus({ type: 'success', message: `Đã cập nhật thành công!` });
       setVersionName('');
       setFile(null);
-      await loadData();
+      loadData();
     } catch (error: any) {
-      console.error("Lỗi Upload:", error);
-      setStatus({ type: 'error', message: `Lỗi xử lý dữ liệu TKB.` });
+      setStatus({ type: 'error', message: `Lỗi xử lý dữ liệu.` });
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSaveTermConfig = async () => {
-    try {
-      if (scheduleService.saveTermConfig) {
-        await scheduleService.saveTermConfig(totalTermWeeks, selectedKTLops);
-        alert("Đã lưu cấu hình học kỳ và danh sách lớp khuyết tật!");
-      }
-    } catch (error) {
-      alert("Lỗi khi lưu cấu hình học kỳ.");
     }
   };
 
@@ -130,25 +104,29 @@ export const AdminDashboard: React.FC = () => {
       setEditingVersion(null);
       loadData();
     } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi đổi tên phiên bản.` });
+      setStatus({ type: 'error', message: `Lỗi đổi tên.` });
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteVersion = async (vName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa phiên bản "${vName}"?`)) return;
+    if (!window.confirm(`Xóa "${vName}"?`)) return;
     setLoading(true);
     try {
       await scheduleService.deleteScheduleByVersion(vName);
       loadData();
     } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi xóa dữ liệu phiên bản.` });
+      setStatus({ type: 'error', message: `Lỗi xóa dữ liệu.` });
     } finally {
       setLoading(false);
     }
   };
 
+  /**
+   * 🔥 HÀM NHẬN DIỆN THÔNG MINH (CỐ ĐỊNH)
+   * Quét toàn diện các từ khóa đặc thù của tiết HĐTN/Chủ nhiệm
+   */
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || 
@@ -176,21 +154,32 @@ export const AdminDashboard: React.FC = () => {
 
           versions.forEach(v => {
             if (v.weeks <= 0) return;
+            
+            // Lọc tất cả tiết GV này dạy tại các lớp Khuyết tật đã chọn
             const vPeriods = allSchedules.filter(s => 
               s.versionName === v.name && 
               s.giao_vien === teacher.name && 
               s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
             );
+
             if (vPeriods.length === 0) return;
+
+            // PHÂN LOẠI THÔNG MINH:
+            // 1. Tìm những lớp mà GV này có dạy tiết HĐTN/SHL/CC (Dấu hiệu của GVCN)
             const classesAsCN = new Set<string>();
             vPeriods.forEach(p => {
               if (isHDTNType(p.mon)) {
                 p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => classesAsCN.add(ml));
               }
             });
+
+            // 2. Tính tiết chuyên môn (Bỏ qua các tiết đã xác định là HĐTN)
             const normalPeriods = vPeriods.filter(p => !isHDTNType(p.mon));
+            
             const classCountMap: Record<string, number> = {};
             let subTotalVersion = 0;
+
+            // Cộng tiết chuyên môn thực tế
             normalPeriods.forEach(p => {
               p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
                 const cleanLop = ml.replace(/\./g, '/');
@@ -199,6 +188,8 @@ export const AdminDashboard: React.FC = () => {
                 subTotalVersion += 1;
               });
             });
+
+            // Cộng 3 tiết định mức cho mỗi lớp chủ nhiệm
             classesAsCN.forEach(ml => {
               const cleanLop = ml.replace(/\./g, '/');
               const key = `HĐTN (CN) lớp ${cleanLop}`;
@@ -206,12 +197,14 @@ export const AdminDashboard: React.FC = () => {
               classesTaughtSet.add(cleanLop);
               subTotalVersion += 3;
             });
+
             if (subTotalVersion > 0) {
               teacherTotalKT += (subTotalVersion * v.weeks);
               const detailStr = Object.entries(classCountMap).map(([l, c]) => `${c}t ${l}`).join(' + ');
               detailsArr.push(`[${detailStr}] x ${v.weeks} tuần`);
             }
           });
+
           if (teacherTotalKT > 0) {
             rows.push({
               'STT': rows.length + 1,
@@ -244,27 +237,19 @@ export const AdminDashboard: React.FC = () => {
       const finalWb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(finalWb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG');
       wb.SheetNames.forEach(name => XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name));
-      XLSX.writeFile(finalWb, `Bao_Cao_Tong_Hop_Khuyet_Tat.xlsx`);
-    } catch (err) { alert("Lỗi xuất file báo cáo."); }
+      XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat_Vinh_Vien.xlsx`);
+    } catch (err) { alert("Lỗi xuất file."); }
   };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
-      {/* 1. UPLOAD SECTION */}
+      {/* 1. UPLOAD */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
-        
-        {status && (
-          <div className={`mb-4 p-4 rounded-lg flex items-center ${status.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-            {status.type === 'success' ? <CheckCircle className="mr-2 w-5 h-5" /> : <AlertCircle className="mr-2 w-5 h-5" />}
-            {status.message}
-          </div>
-        )}
-
         <div className="space-y-4 mb-6">
           <label className="block">
             <span className="text-sm font-bold text-gray-700 flex items-center mb-2"><Tag className="w-4 h-4 mr-2" /> Tên phiên bản:</span>
-            <input type="text" placeholder="Ví dụ: TKB SỐ 7..." className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" value={versionName} onChange={(e) => setVersionName(e.target.value)} />
+            <input type="text" placeholder="TKB Số..." className="w-full px-4 py-2 border border-gray-300 rounded-lg" value={versionName} onChange={(e) => setVersionName(e.target.value)} />
           </label>
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition-colors">
             <FileSpreadsheet className="mx-auto h-10 w-10 text-gray-400 mb-3" />
@@ -274,55 +259,23 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
         <div className="flex justify-between items-center">
-          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md hover:bg-indigo-700 disabled:bg-gray-300 transition-all flex items-center">
-            {loading && <Loader2 className="animate-spin mr-2 w-4 h-4" />}
-            {loading ? 'Đang xử lý...' : 'Tải lên hệ thống'}
-          </button>
+          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md">{loading ? 'Đang xử lý...' : 'Tải lên'}</button>
           {!showDeleteConfirm ? (
-            <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm underline hover:text-red-800">Xóa sạch dữ liệu</button>
+            <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm underline">Xóa sạch dữ liệu</button>
           ) : (
             <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-md">
-              <span className="text-xs text-red-600 font-bold">Xác nhận xóa?</span>
-              <button onClick={async () => { await scheduleService.deleteAllSchedules(); loadData(); setShowDeleteConfirm(false); }} className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">Xóa 100%</button>
-              <button onClick={() => setShowDeleteConfirm(false)} className="px-2 py-1 bg-white text-xs rounded border border-gray-300">Hủy</button>
+              <button onClick={async () => { await scheduleService.deleteAllSchedules(); loadData(); setShowDeleteConfirm(false); }} className="px-2 py-1 bg-red-600 text-white text-xs rounded">Xóa 100%</button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="px-2 py-1 bg-white text-xs rounded border">Hủy</button>
             </div>
           )}
         </div>
       </div>
 
-      {/* 2. CẤU HÌNH HỌC KỲ & LỚP KHUYẾT TẬT */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-200">
-        <h3 className="text-xl font-bold text-indigo-800 mb-6 flex items-center"><Calendar className="mr-2" /> Cấu hình Học kỳ & Lớp Khuyết tật</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-600">Tổng số tuần của đợt kê khai:</label>
-                <div className="flex items-center gap-3">
-                    <input type="number" className="w-24 p-2 border rounded-lg text-center font-bold text-indigo-700" value={totalTermWeeks} onChange={(e) => setTotalTermWeeks(parseInt(e.target.value) || 0)} />
-                    <span className="text-sm text-gray-500">tuần</span>
-                </div>
-            </div>
-            <div className="flex items-end">
-                <button onClick={handleSaveTermConfig} className="bg-indigo-700 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-indigo-800 transition-colors">
-                    <Save className="w-4 h-4" /> Lưu cấu hình chung
-                </button>
-            </div>
-        </div>
-        <p className="text-sm text-gray-600 mb-4 italic font-medium">Chọn các lớp có HS khuyết tật (dữ liệu này dùng chung toàn trường):</p>
-        <div className="flex flex-wrap gap-2 mb-4 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl border border-gray-100">
-          {allClassNames.map(lop => (
-            <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-400'}`}>
-              {lop.replace(/\./g, '/')}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 3. QUẢN LÝ PHIÊN BẢN TKB */}
+      {/* 2. QUẢN LÝ PHIÊN BẢN */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-        <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><Save className="mr-2 text-amber-500" /> Quản lý TKB & Số tuần dạy thực tế</h3>
+        <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><Save className="mr-2 text-amber-500" /> Số tuần dạy thực tế</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {versions.length > 0 ? versions.map(v => (
+          {versions.map(v => (
             <div key={v.name} className="p-4 bg-gray-50 rounded-xl border border-gray-200 group">
               <div className="flex justify-between items-center mb-3">
                 {editingVersion === v.name ? (
@@ -333,21 +286,29 @@ export const AdminDashboard: React.FC = () => {
                 <button onClick={() => handleDeleteVersion(v.name)} className="text-red-400 opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
               </div>
               <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-100">
-                <span className="text-xs text-gray-500">Áp dụng trong:</span>
-                <input type="number" className="w-16 border-b-2 text-center font-bold text-indigo-700 outline-none border-indigo-200" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
+                <span className="text-xs text-gray-500">Dạy:</span>
+                <input type="number" className="w-16 border-b-2 text-center font-bold text-indigo-700 outline-none" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
                 <span className="text-xs text-gray-500">tuần</span>
               </div>
             </div>
-          )) : <p className="text-gray-400 text-sm italic">Chưa có dữ liệu phiên bản TKB.</p>}
+          ))}
         </div>
       </div>
 
-      {/* 4. XUẤT BÁO CÁO TỔNG HỢP */}
+      {/* 3. XUẤT BÁO CÁO */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-200">
-        <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Tổng hợp khuyết tật toàn trường</h3>
+        <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Chế độ Khuyết tật</h3>
+        <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl">
+          {allClassNames.map(lop => (
+            <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'}`}>
+              {lop.replace(/\./g, '/')}
+            </button>
+          ))}
+        </div>
         <button onClick={exportIntegratedReport} disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg transition-all">
-          <FileSpreadsheet className="inline mr-2 h-6 w-6" /> XUẤT BÁO CÁO EXCEL TỔNG HỢP
+          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg">
+          <FileSpreadsheet className="inline mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO CỐ ĐỊNH (TỰ NHẬN DIỆN GVCN)
         </button>
       </div>
     </div>

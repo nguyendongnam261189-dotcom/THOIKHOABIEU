@@ -42,7 +42,7 @@ const MaintenancePage = () => (
         </p>
         <div className="bg-orange-50 p-4 rounded-2xl flex items-center justify-center gap-3 text-orange-700 font-bold border border-orange-100">
           <Clock className="w-5 h-5" />
-          Dự kiến hoàn tất: Sau 14h00 chiều nay
+          Dự kiến hoàn tất: Sau 19h00 chiều nay
         </div>
         <p className="text-sm italic">
           Xin lỗi quý thầy cô vì sự bất tiện này!

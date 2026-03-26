@@ -1,9 +1,25 @@
-import { collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Teacher, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'teachers';
+
+/**
+ * 🔥 HÀM TẠO ID CỐ ĐỊNH TỪ TÊN ĐÃ PHÂN TÍCH
+ * Giúp gộp "Hải" và "Nguyễn Ngọc Hải" hoặc phân biệt 2 cô Vân.
+ */
+const generateTeacherId = (name: string): string => {
+  if (!name) return 'unknown';
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .trim();
+};
 
 export const teacherService = {
   async getAllTeachers(): Promise<Teacher[]> {
@@ -20,21 +36,46 @@ export const teacherService = {
     try {
       const batch = writeBatch(db);
       
-      // Delete existing teachers first
-      const existingDocs = await getDocs(collection(db, COLLECTION_NAME));
-      existingDocs.forEach(doc => {
-        batch.delete(doc.ref);
+      // 1. Lấy dữ liệu hiện có trên Firebase để đối soát tổ chuyên môn
+      const existingSnapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const existingMap = new Map();
+      existingSnapshot.forEach(doc => {
+        existingMap.set(doc.id, doc.data());
       });
 
-      // Add new teachers
+      // 2. Xử lý danh sách giáo viên mới từ Excel
       teachers.forEach(teacher => {
-        const docRef = doc(collection(db, COLLECTION_NAME));
-        batch.set(docRef, teacher);
+        if (!teacher.name) return;
+
+        const tId = generateTeacherId(teacher.name);
+        const docRef = doc(db, COLLECTION_NAME, tId);
+        const oldData = existingMap.get(tId);
+
+        // Giữ lại tên dài nhất (Ưu tiên tên đầy đủ từ PCGD so với tên viết tắt TKB)
+        let finalName = teacher.name;
+        if (oldData && oldData.name && oldData.name.length > teacher.name.length) {
+          finalName = oldData.name;
+        }
+
+        // Bảo vệ tổ chuyên môn: Nếu cũ đã có tổ xịn, mới là "Chung" thì lấy cái cũ
+        let finalGroup = teacher.group || 'Chung';
+        if (oldData && oldData.group && oldData.group !== 'Chung' && finalGroup === 'Chung') {
+          finalGroup = oldData.group;
+        }
+
+        // 3. Ghi dữ liệu bằng SET MERGE (Không xóa cũ, chỉ cập nhật hoặc thêm mới)
+        batch.set(docRef, {
+          ...teacher,
+          id: tId,
+          name: finalName,
+          group: finalGroup
+        }, { merge: true });
       });
 
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+      throw error;
     }
   },
 

@@ -4,7 +4,7 @@ import { Schedule, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'schedules';
-const CONFIG_COLLECTION = 'version_configs';
+const CONFIG_COLLECTION = 'version_configs'; 
 const TERM_CONFIG_COLLECTION = 'term_settings'; // Collection lưu cấu hình học kỳ chung
 
 export const scheduleService = {
@@ -44,6 +44,7 @@ export const scheduleService = {
   },
 
   // 🔥 HÀM MỚI 1: LƯU CẤU HÌNH HỌC KỲ & LỚP KHUYẾT TẬT CHUNG
+  // Hàm này giúp AdminDashboard lưu danh sách lớp KT và tổng tuần vào Firebase
   async saveTermConfig(totalWeeks: number, ktLops: string[]): Promise<void> {
     try {
       const docRef = doc(db, TERM_CONFIG_COLLECTION, 'current_term');
@@ -65,7 +66,7 @@ export const scheduleService = {
       const snapshot = await getDoc(docRef);
       return snapshot.exists() ? snapshot.data() : null;
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, TERM_CONFIG_COLLECTION);
+      // Không báo lỗi nếu chưa có cấu hình, chỉ trả về null
       return null;
     }
   },
@@ -102,7 +103,8 @@ export const scheduleService = {
       
       snapshot.forEach(document => {
         const data = document.data();
-        if ((data.versionName || 'Không rõ') === versionName) {
+        const currentVName = data.versionName || 'Không rõ';
+        if (currentVName === versionName) {
           batch.delete(document.ref);
           count++;
         }
@@ -127,22 +129,27 @@ export const scheduleService = {
       let count = 0;
 
       snapshot.forEach((document) => {
-        if ((document.data().versionName || 'Không rõ') === oldName) {
-          batch.update(document.ref, { versionName: newName });
+        const data = document.data();
+        const currentVName = data.versionName || 'Không rõ';
+        
+        if (currentVName === oldName) {
+          const docRef = doc(db, COLLECTION_NAME, document.id);
+          batch.update(docRef, { versionName: newName });
           count++;
         }
       });
 
       const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
       const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
-      const oldConfigSnap = await getDoc(oldConfigRef);
       
-      if (oldConfigSnap.exists()) {
-        batch.set(newConfigRef, { ...oldConfigSnap.data(), versionName: newName });
+      const configs = await this.getVersionConfigs();
+      const oldConfig = configs.find(c => c.versionName === oldName);
+      if (oldConfig) {
+        batch.set(newConfigRef, { ...oldConfig, versionName: newName });
         batch.delete(oldConfigRef);
       }
 
-      if (count > 0 || oldConfigSnap.exists()) {
+      if (count > 0) {
         await batch.commit();
       }
     } catch (error) {
@@ -153,16 +160,15 @@ export const scheduleService = {
 
   async deleteAllSchedules(): Promise<void> {
     try {
-      const batch = writeBatch(db);
-      const [sSnap, cSnap, tSnap] = await Promise.all([
-        getDocs(collection(db, COLLECTION_NAME)),
-        getDocs(collection(db, CONFIG_COLLECTION)),
-        getDocs(collection(db, TERM_CONFIG_COLLECTION))
-      ]);
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const configSnapshot = await getDocs(collection(db, CONFIG_COLLECTION));
+      const termSnapshot = await getDocs(collection(db, TERM_CONFIG_COLLECTION)); // Xóa luôn settings học kỳ
       
-      sSnap.forEach(doc => batch.delete(doc.ref));
-      cSnap.forEach(doc => batch.delete(doc.ref));
-      tSnap.forEach(doc => batch.delete(doc.ref));
+      const batch = writeBatch(db);
+      
+      snapshot.forEach(doc => batch.delete(doc.ref));
+      configSnapshot.forEach(doc => batch.delete(doc.ref));
+      termSnapshot.forEach(doc => batch.delete(doc.ref));
       
       await batch.commit();
     } catch (error) {

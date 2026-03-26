@@ -11,13 +11,50 @@ import { ClassView } from './pages/ClassView';
 import { SubstituteTeacher } from './pages/SubstituteTeacher';
 import { TeacherManagement } from './pages/TeacherManagement';
 import { UserManagement } from './pages/UserManagement';
-// 🔥 IMPORT THÊM FILE DASHBOARD MỚI TẠO
 import { Dashboard } from './pages/Dashboard'; 
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Loader2, Clock, XCircle } from 'lucide-react';
+import { Loader2, Clock, XCircle, HardHat, AlertTriangle } from 'lucide-react';
 import { ZaloWarning } from './components/ZaloWarning';
-// THÊM DÒNG NÀY ĐỂ GỌI BẢNG THÔNG BÁO CÀI ĐẶT APP
 import { InstallPrompt } from './components/InstallPrompt'; 
+
+// ========================================================
+// 🔥 CẤU HÌNH CHẾ ĐỘ BẢO TRÌ (MỀM)
+// Thầy chỉ cần đổi thành false để mở lại hệ thống bình thường
+// ========================================================
+const IS_MAINTENANCE = true; 
+
+/**
+ * 🚧 Component Trang Bảo trì
+ */
+const MaintenancePage = () => (
+  <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+    <div className="bg-white p-10 rounded-3xl shadow-xl max-w-lg w-full border border-orange-100">
+      <div className="relative mb-6 inline-block">
+        <HardHat className="w-20 h-20 text-orange-500 mx-auto" />
+        <AlertTriangle className="w-8 h-8 text-amber-500 absolute -bottom-1 -right-1 bg-white rounded-full p-1 shadow-sm" />
+      </div>
+      
+      <h2 className="text-3xl font-extrabold text-gray-800 mb-4">Hệ thống đang nâng cấp</h2>
+      
+      <div className="space-y-4 text-gray-600 leading-relaxed mb-8">
+        <p>
+          Chúng tôi đang tiến hành đồng bộ dữ liệu Thời khóa biểu mới để phục vụ quý thầy cô tốt hơn.
+        </p>
+        <div className="bg-orange-50 p-4 rounded-2xl flex items-center justify-center gap-3 text-orange-700 font-bold border border-orange-100">
+          <Clock className="w-5 h-5" />
+          Dự kiến hoàn tất: Sau 14h00 chiều nay
+        </div>
+        <p className="text-sm italic">
+          Xin lỗi quý thầy cô vì sự bất tiện này!
+        </p>
+      </div>
+
+      <div className="pt-6 border-t border-gray-100">
+        <p className="text-xs text-gray-400">© 2026 Hệ thống Quản lý Thời khóa biểu</p>
+      </div>
+    </div>
+  </div>
+);
 
 const PendingApproval = () => (
   <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
@@ -57,18 +94,15 @@ const Rejected = () => (
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
-  // 🔥 BỔ SUNG 'manager' VÀO KHAI BÁO STATE
   const [role, setRole] = useState<'admin' | 'manager' | 'teacher' | 'ttcm' | null>(null);
   const [department, setDepartment] = useState<string | null>(null);
-  const [teacherName, setTeacherName] = useState<string | null>(null); // THÊM STATE LƯU TÊN GIÁO VIÊN
+  const [teacherName, setTeacherName] = useState<string | null>(null);
   const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Chống Google Translate tự động làm sai lệch chữ trên điện thoại Android
   useEffect(() => {
     document.documentElement.lang = "vi";
     document.documentElement.setAttribute("translate", "no");
-    
     let meta = document.querySelector('meta[name="google"]');
     if (!meta) {
       meta = document.createElement('meta');
@@ -83,27 +117,23 @@ const App: React.FC = () => {
       if (currentUser) {
         setUser(currentUser);
         try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            // 🔥 BỔ SUNG 'manager' VÀO ÉP KIỂU (TYPE CASTING)
-            setRole(data.role as 'admin' | 'manager' | 'teacher' | 'ttcm');
-            setDepartment(data.department || null);
-            setTeacherName(data.teacherName || null); // ĐỌC TÊN GIÁO VIÊN TỪ FIREBASE
-            setStatus(data.status || 'pending');
-          } else {
-            // Lần đầu tiên đăng nhập chưa có record trong Database
-            setRole('teacher');
-            setDepartment(null);
-            setTeacherName(null);
-            setStatus('pending');
+          // Chỉ gọi database nếu KHÔNG trong chế độ bảo trì để tiết kiệm Quota
+          if (!IS_MAINTENANCE) {
+            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              setRole(data.role as 'admin' | 'manager' | 'teacher' | 'ttcm');
+              setDepartment(data.department || null);
+              setTeacherName(data.teacherName || null);
+              setStatus(data.status || 'pending');
+            } else {
+              setRole('teacher');
+              setStatus('pending');
+            }
           }
         } catch (error) {
           console.error("Error fetching user role:", error);
           setRole('teacher');
-          setDepartment(null);
-          setTeacherName(null);
           setStatus('pending');
         }
       } else {
@@ -118,6 +148,12 @@ const App: React.FC = () => {
 
     return () => unsubscribe();
   }, []);
+
+  // 🛡️ CHẶN TRUY CẬP NẾU ĐANG BẢO TRÌ (Chỉ Admin mới có thể lách qua nếu thầy muốn code thêm, 
+  // nhưng hiện tại tôi sẽ chặn toàn bộ để bảo vệ Quota của thầy)
+  if (IS_MAINTENANCE && !loading) {
+    return <MaintenancePage />;
+  }
 
   if (loading) {
     return (
@@ -137,10 +173,7 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      {/* Gọi component chặn Zalo đã được import ở trên */}
       <ZaloWarning /> 
-      
-      {/* HIỂN THỊ BẢNG MỜI CÀI ĐẶT APP (Sẽ tự nổi lên sau 2s nếu dùng ĐTDĐ) */}
       <InstallPrompt />
       
       <Router>
@@ -148,11 +181,9 @@ const App: React.FC = () => {
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
           
           <Route path="/" element={user ? <Layout role={role} /> : <Navigate to="/login" />}>
-            {/* TRUYỀN THÊM BIẾN teacherName VÀO TRANG XEM TKB */}
             <Route index element={<TeacherView role={role} department={department} teacherName={teacherName} />} />
             <Route path="class" element={<ClassView />} />
             
-            {/* Admin Routes */}
             <Route 
               path="admin" 
               element={role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} 
@@ -162,7 +193,6 @@ const App: React.FC = () => {
               element={role === 'admin' ? <UserManagement /> : <Navigate to="/" />} 
             />
 
-            {/* 🔥 ROUTE MỚI CHO TRANG THỐNG KÊ (Dành cho Admin, Manager và TTCM) */}
             <Route 
               path="dashboard" 
               element={(role === 'admin' || role === 'manager' || role === 'ttcm') ? <Dashboard role={role} department={department} /> : <Navigate to="/" />} 

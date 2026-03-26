@@ -5,7 +5,10 @@ import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'teachers';
 
-// Hàm hỗ trợ chuẩn hóa tên làm ID (Ví dụ: "Nguyễn Đông Nam" -> "nguyen_dong_nam")
+/**
+ * 🔥 HÀM CHUẨN HÓA ID GIÁO VIÊN: 
+ * Biến "Nguyễn Văn A" thành "nguyen_van_a" để dùng làm ID cố định.
+ */
 const generateTeacherId = (name: string): string => {
   return name
     .toLowerCase()
@@ -17,13 +20,14 @@ const generateTeacherId = (name: string): string => {
     .trim();
 };
 
-// Hàm tự động xác định tổ dựa trên môn học cho các giáo viên "vãng lai"
-const getAutomaticGroup = (subject: string): string => {
-  const s = subject.toUpperCase();
-  if (s.includes('GDTC') || s.includes('THE DUC')) return 'Năng khiếu'; // Hoặc tên tổ Thể dục của trường
-  if (s.includes('CNGHE') || s.includes('CÔNG NGHỆ')) return 'Lý - Công nghệ';
-  if (s.includes('TIN')) return 'Toán - Tin';
-  return 'Chung'; // Mặc định nếu không khớp
+/**
+ * 🔥 HÀM TỰ ĐỘNG PHÂN TỔ DỰA TRÊN MÔN DẠY
+ */
+const inferGroupFromSubject = (subject: string): string => {
+  const s = (subject || '').toUpperCase();
+  if (s.includes('GDTC') || s.includes('THỂ DỤC')) return 'Nghệ thuật - Thể chất';
+  if (s.includes('CNGHE') || s.includes('CÔNG NGHỆ')) return 'KHTN và Công nghệ';
+  return 'Chung';
 };
 
 export const teacherService = {
@@ -41,39 +45,41 @@ export const teacherService = {
     try {
       const batch = writeBatch(db);
       
-      // Lấy danh sách giáo viên hiện có để kiểm tra tổ
+      // 1. Lấy dữ liệu giáo viên hiện có để bảo vệ Tổ chuyên môn (Group)
       const existingSnapshot = await getDocs(collection(db, COLLECTION_NAME));
-      const existingTeachers: Record<string, any> = {};
+      const existingData: Record<string, any> = {};
       existingSnapshot.forEach(doc => {
-        existingTeachers[doc.id] = doc.data();
+        existingData[doc.id] = doc.data();
       });
 
+      // 2. Xử lý từng giáo viên từ file Excel mới
       teachers.forEach(teacher => {
+        if (!teacher.name) return;
+
         const tId = generateTeacherId(teacher.name);
         const docRef = doc(db, COLLECTION_NAME, tId);
-        
-        const oldData = existingTeachers[tId];
-        
-        // LOGIC BẢO VỆ TỔ CHUYÊN MÔN:
-        // Nếu đã có dữ liệu cũ và tổ cũ khác "Chung", giữ nguyên tổ cũ.
-        // Nếu là giáo viên mới hoàn toàn, kiểm tra môn để tự xếp tổ.
-        let finalGroup = teacher.group;
-        
-        if (oldData && oldData.group && oldData.group !== 'Chung' && oldData.group !== '') {
-          finalGroup = oldData.group;
-        } else if (finalGroup === 'Chung' || !finalGroup) {
-          finalGroup = getAutomaticGroup(teacher.subject);
+        const oldTeacher = existingData[tId];
+
+        // LOGIC BẢO VỆ TỔ CHUYÊN MÔN & TỰ ĐỘNG PHÂN TỔ
+        let finalGroup = teacher.group || 'Chung';
+
+        // Nếu giáo viên đã có trên hệ thống và có tổ (khác Chung), giữ nguyên tổ cũ
+        if (oldTeacher && oldTeacher.group && oldTeacher.group !== 'Chung') {
+          finalGroup = oldTeacher.group;
+        } 
+        // Nếu là giáo viên mới hoàn toàn hoặc tổ đang là "Chung", thử đoán tổ từ môn dạy
+        else if (finalGroup === 'Chung') {
+          finalGroup = inferGroupFromSubject(teacher.subject);
         }
 
-        // Chỉ cập nhật môn học và giữ lại các thông tin quan trọng khác
+        // 3. Ghi dữ liệu bằng lệnh SET với MERGE để không làm mất thông tin cũ
         batch.set(docRef, {
           ...teacher,
           id: tId,
           group: finalGroup,
-          // Hợp nhất danh sách môn dạy để không bị mất dữ liệu môn từ các TKB khác
+          // Hợp nhất danh sách môn có thể dạy (phục vụ thống kê đa TKB)
           teachableSubjects: Array.from(new Set([
-            ...(oldData?.teachableSubjects || []),
-            ...(teacher.teachableSubjects || []),
+            ...(oldTeacher?.teachableSubjects || []),
             teacher.subject
           ].filter(Boolean)))
         }, { merge: true });

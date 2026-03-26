@@ -1,11 +1,10 @@
-import { collection, doc, getDocs, writeBatch, query, where, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, writeBatch, query, where, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Schedule, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'schedules';
-const CONFIG_COLLECTION = 'version_configs'; 
-const TERM_CONFIG_COLLECTION = 'term_settings'; // Collection lưu cấu hình học kỳ chung
+const CONFIG_COLLECTION = 'version_configs'; // 🔥 Collection mới để lưu số tuần
 
 export const scheduleService = {
   async getAllSchedules(): Promise<Schedule[]> {
@@ -43,34 +42,7 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 HÀM MỚI 1: LƯU CẤU HÌNH HỌC KỲ & LỚP KHUYẾT TẬT CHUNG
-  // Hàm này giúp AdminDashboard lưu danh sách lớp KT và tổng tuần vào Firebase
-  async saveTermConfig(totalWeeks: number, ktLops: string[]): Promise<void> {
-    try {
-      const docRef = doc(db, TERM_CONFIG_COLLECTION, 'current_term');
-      await setDoc(docRef, {
-        totalWeeks,
-        ktLops,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, TERM_CONFIG_COLLECTION);
-      throw error;
-    }
-  },
-
-  // 🔥 HÀM MỚI 2: LẤY CẤU HÌNH HỌC KỲ
-  async getTermConfig(): Promise<any> {
-    try {
-      const docRef = doc(db, TERM_CONFIG_COLLECTION, 'current_term');
-      const snapshot = await getDoc(docRef);
-      return snapshot.exists() ? snapshot.data() : null;
-    } catch (error) {
-      // Không báo lỗi nếu chưa có cấu hình, chỉ trả về null
-      return null;
-    }
-  },
-
+  // 🔥 HÀM MỚI 1: LƯU SỐ TUẦN ÁP DỤNG CHO PHIÊN BẢN
   async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
     try {
       const docRef = doc(db, CONFIG_COLLECTION, versionName);
@@ -85,6 +57,7 @@ export const scheduleService = {
     }
   },
 
+  // 🔥 HÀM MỚI 2: LẤY TẤT CẢ CẤU HÌNH PHIÊN BẢN
   async getVersionConfigs(): Promise<any[]> {
     try {
       const snapshot = await getDocs(collection(db, CONFIG_COLLECTION));
@@ -110,6 +83,7 @@ export const scheduleService = {
         }
       });
       
+      // 🔥 Dọn dẹp luôn cấu hình số tuần khi xóa phiên bản
       const configRef = doc(db, CONFIG_COLLECTION, versionName);
       batch.delete(configRef);
       
@@ -139,9 +113,11 @@ export const scheduleService = {
         }
       });
 
+      // 🔥 Đổi tên cả trong bảng cấu hình số tuần
       const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
       const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
       
+      // Trong Firestore không có lệnh rename doc, nên ta phải lấy dữ liệu cũ và ghi sang doc mới
       const configs = await this.getVersionConfigs();
       const oldConfig = configs.find(c => c.versionName === oldName);
       if (oldConfig) {
@@ -162,13 +138,10 @@ export const scheduleService = {
     try {
       const snapshot = await getDocs(collection(db, COLLECTION_NAME));
       const configSnapshot = await getDocs(collection(db, CONFIG_COLLECTION));
-      const termSnapshot = await getDocs(collection(db, TERM_CONFIG_COLLECTION)); // Xóa luôn settings học kỳ
-      
       const batch = writeBatch(db);
       
       snapshot.forEach(doc => batch.delete(doc.ref));
       configSnapshot.forEach(doc => batch.delete(doc.ref));
-      termSnapshot.forEach(doc => batch.delete(doc.ref));
       
       await batch.commit();
     } catch (error) {

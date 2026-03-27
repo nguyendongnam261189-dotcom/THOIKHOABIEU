@@ -21,7 +21,7 @@ import { InstallPrompt } from './components/InstallPrompt';
 // 🔥 CẤU HÌNH CHẾ ĐỘ BẢO TRÌ (MỀM)
 // Thầy chỉ cần đổi thành false để mở lại hệ thống bình thường
 // ========================================================
-const IS_MAINTENANCE = true; 
+const IS_MAINTENANCE = false; 
 
 /**
  * 🚧 Component Trang Bảo trì

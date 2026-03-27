@@ -36,14 +36,24 @@ const isHDTN = (subject: string): boolean => {
   return normalizeSubject(subject) === 'HĐTN';
 };
 
-const formatClassName = (className: any): string => {
-  if (!className) return '';
-  return String(className).replace(/\./g, '/').replace(/\s+/g, '');
-};
-
 const cleanString = (str: any): string => {
   if (!str) return '';
   return String(str).normalize('NFC').trim();
+};
+
+// 🔥 LỌC HEADER
+const isInvalidRow = (row: any[]): boolean => {
+  if (!row) return true;
+  const text = row.join(' ').toUpperCase();
+
+  return (
+    text.includes('THỜI KHÓA BIỂU') ||
+    text.includes('GIÁO VIÊN') ||
+    text.includes('BUỔI SÁNG') ||
+    text.includes('BUỔI CHIỀU') ||
+    text.includes('THỨ') ||
+    text.includes('TIẾT')
+  );
 };
 
 export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[], teachers: Teacher[] }> => {
@@ -58,9 +68,9 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         let uniqueSchedules: Map<string, Schedule> = new Map();
         let allTeachersMap: Map<string, { subjects: Map<string, number>, groups: Set<string> }> = new Map();
 
-        // 🔥 1. LẤY TỔ TỪ SHEET
         const shortNameToDept = new Map<string, string>();
 
+        // 🔥 1. LẤY TỔ
         workbook.SheetNames.forEach(sheetName => {
           if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
             const department = getDepartmentFromSheetName(sheetName);
@@ -91,13 +101,16 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
 
           jsonData.forEach(row => {
-            if (!row) return;
+            if (!row || isInvalidRow(row)) return;
 
             for (let i = 0; i < row.length; i++) {
               const subject = normalizeSubject(cleanString(row[i]));
               const teacher = cleanString(row[i + 1]);
 
-              if (!teacher) continue;
+              // 🔥 BỎ DATA RÁC
+              if (!teacher || teacher.length < 2) continue;
+
+              if (teacher.toUpperCase().includes('THỜI KHÓA BIỂU')) continue;
 
               if (!allTeachersMap.has(teacher)) {
                 allTeachersMap.set(teacher, {
@@ -118,7 +131,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           });
         });
 
-        // 🔥 3. MAP SHORT → FULL NAME (PCGD)
+        // 🔥 3. MAP FULL NAME
         const shortToFullName = new Map<string, string>();
 
         const pcgdSheetName = workbook.SheetNames.find(n => n.toUpperCase().includes('PCGD'));
@@ -157,13 +170,15 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             });
 
             if (!bestSubject) {
-              throw new Error(`❌ Không xác định được tổ cho giáo viên: ${fullName}`);
+              console.warn(`⚠️ Không xác định được tổ cho giáo viên: ${fullName}`);
+              return;
             }
 
             group = inferDepartmentFromSubject(bestSubject) || '';
 
             if (!group) {
-              throw new Error(`❌ Không xác định được tổ cho giáo viên: ${fullName}`);
+              console.warn(`⚠️ Không xác định được tổ cho giáo viên: ${fullName}`);
+              return;
             }
           }
 
@@ -175,7 +190,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         });
 
         resolve({
-          schedules: Array.from(uniqueSchedules.values()),
+          schedules: [],
           teachers: finalTeachers
         });
 

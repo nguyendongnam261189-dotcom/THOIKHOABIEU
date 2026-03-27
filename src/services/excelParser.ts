@@ -12,16 +12,16 @@ const getDepartmentFromSheetName = (sheetName: string): string => {
   return 'Chung';
 };
 
-// Hàm kiểm tra môn chuyên môn (Loại bỏ các môn sinh hoạt/ngoại khóa)
 const isProfessionalSubject = (subject: string): boolean => {
   if (!subject) return false;
   const s = subject.toUpperCase();
-  const nonProfessional = ['HĐTN', 'HDTN', 'SHL', 'CHÀO CỜ', 'CC-', 'CC', 'GDĐP', 'ĐỊA PHƯƠNG'];
-  return !nonProfessional.some(keyword => s.includes(keyword));
+  const nonProfessional = ['SHL', 'CHÀO CỜ', 'CC-', 'CC', 'GDĐP', 'ĐỊA PHƯƠNG'];
+  // HĐTN chỉ bị lọc nếu giáo viên có nhiều môn khác. Nếu là môn duy nhất sẽ được giữ lại ở bước sau.
+  return !nonProfessional.some(keyword => s.includes(keyword)) && !s.includes('HĐTN') && !s.includes('HDTN');
 };
 
 const inferDepartmentFromSubject = (subject: string): string | null => {
-  if (!subject || !isProfessionalSubject(subject)) return null;
+  if (!subject) return null;
   const s = subject.toUpperCase();
   if (s.includes('ANH') || s.includes('AVĂN')) return 'Ngoại ngữ';
   if (s.includes('VĂN') || s.includes('GDCD')) return 'Văn - GDCD';
@@ -43,7 +43,6 @@ const cleanString = (str: any): string => {
   return String(str).normalize('NFC').trim();
 };
 
-// Hàm tạo ID cố định không dấu
 const generateFixedId = (name: string): string => {
   return name.toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -51,6 +50,11 @@ const generateFixedId = (name: string): string => {
     .replace(/[^a-z0-9]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
+};
+
+// Hàm chuẩn hóa tên viết tắt để so khớp (ví dụ: Oanh.A -> OANHA)
+const normalizeShortName = (name: string): string => {
+  return name.toUpperCase().replace(/[^A-ZĐÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]/g, '');
 };
 
 export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[], teachers: Teacher[] }> => {
@@ -64,43 +68,42 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
 
         let uniqueSchedules: Map<string, Schedule> = new Map();
         let allTeachersMap: Map<string, Teacher> = new Map();
-
         const teacherDepartmentDict = new Map<string, string>();
+
+        // 1. ĐỌC TỔ TỪ SHEET
         workbook.SheetNames.forEach(sheetName => {
-            if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
-                const department = getDepartmentFromSheetName(sheetName);
-                if (department === 'Chung') return; 
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
-                for (let i = 0; i < Math.min(15, jsonData.length); i++) {
-                    const row = jsonData[i] || [];
-                    const rowStr = row.map((c: any) => String(c).toLowerCase()).join('');
-                    if (rowStr.includes('thứ') || rowStr.includes('thu') || rowStr.includes('tiết')) {
-                        for(let c = 2; c < row.length; c++) { 
-                            let teacherName = cleanString(row[c]);
-                            if (teacherName && !['sáng', 'chiều'].includes(teacherName.toLowerCase())) {
-                                teacherDepartmentDict.set(teacherName, department);
-                            }
-                        }
-                        break; 
-                    }
+          if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
+            const department = getDepartmentFromSheetName(sheetName);
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
+            for (let i = 0; i < Math.min(15, jsonData.length); i++) {
+              const row = jsonData[i] || [];
+              const rowStr = row.map((c: any) => String(c).toLowerCase()).join('');
+              if (rowStr.includes('thứ') || rowStr.includes('tiết')) {
+                for (let c = 2; c < row.length; c++) {
+                  let teacherName = cleanString(row[c]);
+                  if (teacherName && !['sáng', 'chiều'].includes(teacherName.toLowerCase())) {
+                    teacherDepartmentDict.set(teacherName, department);
+                  }
                 }
+                break;
+              }
             }
+          }
         });
 
+        // 2. ĐỌC MÔN HỌC TỪ PCGD (PCGD_Subjects)
         const knownSubjects = new Set<string>();
         const pcgdSheetName = workbook.SheetNames.find(name => name.toUpperCase().includes('PCGD') || name.toUpperCase().includes('PHÂN CÔNG'));
         if (pcgdSheetName) {
           const worksheet = workbook.Sheets[pcgdSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
-          let pccmColIdx = -1; let headerRowIdx = -1;
+          let pccmColIdx = -1, headerRowIdx = -1;
           for (let i = 0; i < Math.min(10, jsonData.length); i++) {
             const row = jsonData[i] || [];
             for (let c = 0; c < row.length; c++) {
               const cellStr = cleanString(row[c]).toLowerCase();
-              if (cellStr.includes('phân công chuyên môn') || cellStr.includes('chuyên môn')) {
-                pccmColIdx = c; headerRowIdx = i; break;
-              }
+              if (cellStr.includes('chuyên môn') || cellStr.includes('môn dạy')) { pccmColIdx = c; headerRowIdx = i; break; }
             }
             if (pccmColIdx !== -1) break;
           }
@@ -119,15 +122,16 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             }
           }
         }
-        ['Toán', 'Văn', 'Anh', 'AVăn', 'Lý', 'Hóa', 'Sinh', 'Sử', 'Địa', 'GDCD', 'Tin', 'CNghệ', 'Công nghệ', 'GDTC', 'Thể dục', 'Nghệ thuật', 'Âm nhạc', 'Mỹ thuật', 'KHTN', 'Lịch sử', 'Địa lý', 'HĐTNHN', 'CC-HĐTNHN', 'SHL', 'Chào cờ'].forEach(s => knownSubjects.add(s));
+        ['Toán', 'Văn', 'Anh', 'AVăn', 'Lý', 'Hóa', 'Sinh', 'Sử', 'Địa', 'GDCD', 'Tin', 'Công nghệ', 'GDTC', 'Nghệ thuật', 'KHTN', 'Lịch sử', 'Địa lý', 'HĐTNHN', 'SHL', 'Chào cờ'].forEach(s => knownSubjects.add(s));
         const sortedKnownSubjects = Array.from(knownSubjects).sort((a, b) => b.length - a.length);
 
+        // 3. ĐỌC TKB
         workbook.SheetNames.forEach(sheetName => {
           if (sheetName.toUpperCase().includes('PCGD') || sheetName.toUpperCase().includes('PHONGHOC')) return;
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
           if (jsonData.length === 0) return;
-          let headerRowIdx = -1; let thuColIdx = -1; let tietColIdx = -1;
+          let headerRowIdx = -1, thuColIdx = -1, tietColIdx = -1;
           for (let i = 0; i < Math.min(15, jsonData.length); i++) {
             const row = jsonData[i] || [];
             let fThu = -1, fTiet = -1;
@@ -163,16 +167,15 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                       let lopRaw = sheetName.includes('LOP') ? colMap[c].headerName : secondary;
                       let gvRaw = sheetName.includes('LOP') ? secondary : colMap[c].headerName;
                       const scheduleObj: Schedule = {
-                        thu: currentThu,
-                        tiet: currentTiet > 5 ? currentTiet - 5 : currentTiet,
+                        thu: currentThu, tiet: currentTiet > 5 ? currentTiet - 5 : currentTiet,
                         lop: lopRaw, mon: mon, giao_vien: gvRaw, phong: '',
                         buoi: currentTiet > 5 ? 'Chiều' : colMap[c].buoi
                       };
                       const key = `${currentThu}-${scheduleObj.buoi}-${currentTiet}-${gvRaw}-${mon}`;
                       if (!uniqueSchedules.has(key)) uniqueSchedules.set(key, scheduleObj);
                       if (!allTeachersMap.has(gvRaw)) {
-                        allTeachersMap.set(gvRaw, { name: gvRaw, subject: isProfessionalSubject(mon) ? mon : '', group: teacherDepartmentDict.get(gvRaw) || 'Chung' });
-                      } else if (isProfessionalSubject(mon)) {
+                        allTeachersMap.set(gvRaw, { name: gvRaw, subject: mon, group: teacherDepartmentDict.get(gvRaw) || 'Chung' });
+                      } else {
                         const t = allTeachersMap.get(gvRaw)!;
                         const subs = new Set(t.subject.split(', ').filter(Boolean));
                         subs.add(mon);
@@ -186,85 +189,97 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
         });
 
+        // 4. ĐỐI SOÁT TÊN THÔNG MINH (PCGD Mapping)
         const shortToFullName = new Map<string, string>();
-        const pcgdTeachers: { fullName: string, uniqueName: string, classes: Set<string> }[] = [];
+        const pcgdTeachers: { fullName: string, uniqueName: string, classes: Set<string>, lastName: string }[] = [];
         if (pcgdSheetName) {
-            const worksheet = workbook.Sheets[pcgdSheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
-            let fullNameColIdx = -1, pccmColIdx = -1, headerRowIdx = -1;
-            for (let i = 0; i < Math.min(15, jsonData.length); i++) {
-                const row = jsonData[i] || [];
-                row.forEach((cell: any, idx: number) => {
-                    const s = cleanString(cell).toLowerCase();
-                    if (s === 'họ và tên' || s === 'họ tên') fullNameColIdx = idx;
-                    if (s.includes('chuyên môn')) pccmColIdx = idx;
-                });
-                if (fullNameColIdx !== -1) { headerRowIdx = i; break; }
+          const worksheet = workbook.Sheets[pcgdSheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
+          let nameCol = -1, pccmCol = -1, hIdx = -1;
+          for (let i = 0; i < Math.min(15, jsonData.length); i++) {
+            const row = jsonData[i] || [];
+            row.forEach((cell: any, idx: number) => {
+              const s = cleanString(cell).toLowerCase();
+              if (s === 'họ và tên' || s === 'họ tên') nameCol = idx;
+              if (s.includes('chuyên môn')) pccmCol = idx;
+            });
+            if (nameCol !== -1) { hIdx = i; break; }
+          }
+          if (nameCol !== -1) {
+            for (let i = hIdx + 1; i < jsonData.length; i++) {
+              const row = jsonData[i] || [];
+              const fName = cleanString(row[nameCol]);
+              if (!fName || fName.length < 4) continue;
+              const pccm = pccmCol !== -1 ? cleanString(row[pccmCol]) : '';
+              const cMatches = pccm.match(/\d{1,2}\s*[./]\s*\d{1,2}/g) || [];
+              pcgdTeachers.push({ 
+                fullName: fName, uniqueName: fName, lastName: fName.split(' ').pop() || '',
+                classes: new Set(cMatches.map(c => formatClassName(c))) 
+              });
             }
-            if (fullNameColIdx !== -1) {
-                for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
-                    const row = jsonData[i] || [];
-                    const fullName = cleanString(row[fullNameColIdx]);
-                    if (!fullName || fullName.length < 4) continue;
-                    const pccmStr = pccmColIdx !== -1 ? cleanString(row[pccmColIdx]) : '';
-                    const classMatches = pccmStr.match(/\d{1,2}\s*[./]\s*\d{1,2}/g) || [];
-                    pcgdTeachers.push({ fullName, uniqueName: fullName, classes: new Set(classMatches.map(c => formatClassName(c))) });
-                }
-            }
-            const nameCounts = new Map<string, number>();
-            pcgdTeachers.forEach(t => nameCounts.set(t.fullName, (nameCounts.get(t.fullName) || 0) + 1));
-            pcgdTeachers.forEach(t => {
-                if (nameCounts.get(t.fullName)! > 1) {
-                   const tInMap = Array.from(allTeachersMap.values()).find(at => at.name.includes(t.fullName.split(' ').pop() || ''));
-                   t.uniqueName = `${t.fullName} (${tInMap?.subject || 'GV'})`;
-                }
-            });
+          }
 
-            const tkbTeacherData = new Map<string, { classes: Set<string> }>();
-            uniqueSchedules.forEach(s => {
-                if (!tkbTeacherData.has(s.giao_vien)) tkbTeacherData.set(s.giao_vien, { classes: new Set() });
-                s.lop.split(',').forEach(c => { if (formatClassName(c) !== 'CHƯAXẾP') tkbTeacherData.get(s.giao_vien)!.classes.add(formatClassName(c)); });
+          const tkbTeacherData = new Map<string, { classes: Set<string> }>();
+          uniqueSchedules.forEach(s => {
+            if (!tkbTeacherData.has(s.giao_vien)) tkbTeacherData.set(s.giao_vien, { classes: new Set() });
+            s.lop.split(',').forEach(c => { 
+              const cl = formatClassName(c); if (cl && cl !== 'CHƯAXẾP') tkbTeacherData.get(s.giao_vien)!.classes.add(cl); 
             });
+          });
 
-            allTeachersMap.forEach((teacher, shortName) => {
-                const tkbClasses = tkbTeacherData.get(shortName)?.classes || new Set();
-                let bestMatch = null, maxScore = -1;
-                pcgdTeachers.forEach(cand => {
-                    let score = 0;
-                    tkbClasses.forEach(c => { if (cand.classes.has(c)) score += 1000; });
-                    if (cand.fullName.toUpperCase() === shortName.toUpperCase()) score += 500;
-                    else if (cand.fullName.toUpperCase().includes(shortName.toUpperCase())) score += 100;
-                    if (score > maxScore) { maxScore = score; bestMatch = cand; }
-                });
-                shortToFullName.set(shortName, (bestMatch && maxScore >= 50) ? (bestMatch as any).uniqueName : shortName);
+          allTeachersMap.forEach((teacher, shortName) => {
+            const tkbClasses = tkbTeacherData.get(shortName)?.classes || new Set();
+            const normShort = normalizeShortName(shortName);
+            let bestMatch = null, maxScore = -1;
+
+            pcgdTeachers.forEach(cand => {
+              let score = 0;
+              tkbClasses.forEach(c => { if (cand.classes.has(c)) score += 2000; }); // Ưu tiên lớp dạy rất cao
+              const normFull = normalizeShortName(cand.fullName);
+              const candLast = cand.lastName.toUpperCase();
+
+              if (normFull === normShort) score += 1000;
+              else if (normFull.includes(normShort) || normShort.includes(candLast)) score += 500;
+              
+              if (score > maxScore) { maxScore = score; bestMatch = cand; }
             });
+            shortToFullName.set(shortName, (bestMatch && maxScore >= 500) ? (bestMatch as any).uniqueName : shortName);
+          });
         }
-        
+
+        // 5. KẾT XUẤT VÀ LỌC MÔN THỰC TẾ
         const finalSchedules = Array.from(uniqueSchedules.values()).map(s => ({
-            ...s,
-            giao_vien: shortToFullName.get(s.giao_vien) || s.giao_vien,
-            lop: s.lop.split(',').map(item => formatClassName(item)).join(', ')
+          ...s,
+          giao_vien: shortToFullName.get(s.giao_vien) || s.giao_vien,
+          lop: s.lop.split(',').map(item => formatClassName(item)).join(', ')
         }));
 
         const mergedTeachersMap = new Map<string, Teacher>();
         Array.from(allTeachersMap.values()).forEach(t => {
-            const mappedName = shortToFullName.get(t.name) || t.name;
-            let finalGroup = t.group;
-            
-            // 🔥 NÂNG CẤP: Chỉ đoán tổ nếu chưa có tổ từ Sheet
-            if (finalGroup === 'Chung') {
-                const inferred = inferDepartmentFromSubject(t.subject);
-                if (inferred) finalGroup = inferred;
-            }
+          const mappedName = shortToFullName.get(t.name) || t.name;
+          let subjects = t.subject.split(', ').map(s => s.trim()).filter(Boolean);
+          
+          // 🔥 LOGIC MÔN CHÍNH: Nếu có > 1 môn, lọc bỏ HĐTN/Phụ. Nếu chỉ có 1 môn, giữ nguyên.
+          let finalSubject = subjects.join(', ');
+          if (subjects.length > 1) {
+            const proSubs = subjects.filter(s => isProfessionalSubject(s));
+            if (proSubs.length > 0) finalSubject = proSubs.join(', ');
+          }
 
-            if (mergedTeachersMap.has(mappedName)) {
-                const existing = mergedTeachersMap.get(mappedName)!;
-                const subs = new Set([...existing.subject.split(', '), ...t.subject.split(', ')]);
-                existing.subject = Array.from(subs).filter(Boolean).join(', ');
-                if (existing.group === 'Chung' && finalGroup !== 'Chung') existing.group = finalGroup;
-            } else {
-                mergedTeachersMap.set(mappedName, { ...t, id: generateFixedId(mappedName), name: mappedName, group: finalGroup });
-            }
+          let finalGroup = t.group;
+          if (finalGroup === 'Chung') {
+            const inferred = inferDepartmentFromSubject(finalSubject);
+            if (inferred) finalGroup = inferred;
+          }
+
+          if (mergedTeachersMap.has(mappedName)) {
+            const existing = mergedTeachersMap.get(mappedName)!;
+            const combined = new Set([...existing.subject.split(', '), ...finalSubject.split(', ')]);
+            existing.subject = Array.from(combined).filter(Boolean).join(', ');
+            if (existing.group === 'Chung' && finalGroup !== 'Chung') existing.group = finalGroup;
+          } else {
+            mergedTeachersMap.set(mappedName, { ...t, id: generateFixedId(mappedName), name: mappedName, subject: finalSubject, group: finalGroup });
+          }
         });
 
         resolve({ schedules: finalSchedules, teachers: Array.from(mergedTeachersMap.values()) });

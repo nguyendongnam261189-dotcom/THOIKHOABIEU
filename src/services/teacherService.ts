@@ -5,10 +5,19 @@ import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'teachers';
 
-// 🔥 TẠO ID ỔN ĐỊNH CHO TEACHER
+// 🔥 FIX: sanitize ID
+const safeString = (str: string): string => {
+  return (str || '')
+    .replace(/\//g, '_')   // bỏ dấu /
+    .replace(/#/g, '')
+    .replace(/\?/g, '')
+    .replace(/\s+/g, '_')  // space → _
+    .trim();
+};
+
 const generateTeacherId = (teacher: Teacher): string => {
-  const name = teacher.name || 'unknown';
-  const group = teacher.group || 'unknown';
+  const name = safeString(teacher.name);
+  const group = safeString(teacher.group);
 
   return `${name}__${group}`;
 };
@@ -24,7 +33,6 @@ export const teacherService = {
     }
   },
 
-  // 🔥 MERGE thay vì xóa
   async mergeTeachers(teachers: Teacher[]): Promise<void> {
     try {
       const batch = writeBatch(db);

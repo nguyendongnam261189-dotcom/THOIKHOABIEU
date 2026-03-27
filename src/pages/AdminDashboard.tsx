@@ -75,7 +75,7 @@ export const AdminDashboard: React.FC = () => {
     try {
       const { schedules, teachers } = await parseExcelFile(file);
       const labeledSchedules = schedules.map(s => ({ ...s, versionName: versionName.trim() }));
-      await teacherService.saveTeachers(teachers);
+      await teacherService.mergeTeachers(teachers);
       await scheduleService.saveSchedules(labeledSchedules); 
       setStatus({ type: 'success', message: `Đã cập nhật dữ liệu thành công!` });
       setVersionName('');

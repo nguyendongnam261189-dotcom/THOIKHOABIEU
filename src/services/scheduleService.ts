@@ -1,1 +1,151 @@
+import { collection, doc, getDocs, writeBatch, query, where, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Schedule, OperationType } from '../types';
+import { handleFirestoreError } from './firebaseUtils';
 
+const COLLECTION_NAME = 'schedules';
+const CONFIG_COLLECTION = 'version_configs'; // 🔥 Collection mới để lưu số tuần
+
+export const scheduleService = {
+  async getAllSchedules(): Promise<Schedule[]> {
+    try {
+      const q = query(collection(db, COLLECTION_NAME));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
+      return [];
+    }
+  },
+
+  async getSchedulesByTeacher(teacherName: string): Promise<Schedule[]> {
+    try {
+      const q = query(collection(db, COLLECTION_NAME), where('giao_vien', '==', teacherName));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
+      return [];
+    }
+  },
+
+  async saveSchedules(schedules: Schedule[]): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      schedules.forEach(schedule => {
+        const docRef = doc(collection(db, COLLECTION_NAME));
+        batch.set(docRef, schedule);
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+    }
+  },
+
+  // 🔥 HÀM MỚI 1: LƯU SỐ TUẦN ÁP DỤNG CHO PHIÊN BẢN
+  async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
+    try {
+      const docRef = doc(db, CONFIG_COLLECTION, versionName);
+      await setDoc(docRef, {
+        versionName,
+        appliedWeeks: weeks,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, CONFIG_COLLECTION);
+      throw error;
+    }
+  },
+
+  // 🔥 HÀM MỚI 2: LẤY TẤT CẢ CẤU HÌNH PHIÊN BẢN
+  async getVersionConfigs(): Promise<any[]> {
+    try {
+      const snapshot = await getDocs(collection(db, CONFIG_COLLECTION));
+      return snapshot.docs.map(doc => doc.data());
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, CONFIG_COLLECTION);
+      return [];
+    }
+  },
+
+  async deleteScheduleByVersion(versionName: string): Promise<void> {
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const batch = writeBatch(db);
+      let count = 0;
+      
+      snapshot.forEach(document => {
+        const data = document.data();
+        const currentVName = data.versionName || 'Không rõ';
+        if (currentVName === versionName) {
+          batch.delete(document.ref);
+          count++;
+        }
+      });
+      
+      // 🔥 Dọn dẹp luôn cấu hình số tuần khi xóa phiên bản
+      const configRef = doc(db, CONFIG_COLLECTION, versionName);
+      batch.delete(configRef);
+      
+      if (count > 0 || versionName !== 'Không rõ') {
+        await batch.commit();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  async renameVersion(oldName: string, newName: string): Promise<void> {
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const batch = writeBatch(db);
+      let count = 0;
+
+      snapshot.forEach((document) => {
+        const data = document.data();
+        const currentVName = data.versionName || 'Không rõ';
+        
+        if (currentVName === oldName) {
+          const docRef = doc(db, COLLECTION_NAME, document.id);
+          batch.update(docRef, { versionName: newName });
+          count++;
+        }
+      });
+
+      // 🔥 Đổi tên cả trong bảng cấu hình số tuần
+      const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
+      const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
+      
+      // Trong Firestore không có lệnh rename doc, nên ta phải lấy dữ liệu cũ và ghi sang doc mới
+      const configs = await this.getVersionConfigs();
+      const oldConfig = configs.find(c => c.versionName === oldName);
+      if (oldConfig) {
+        batch.set(newConfigRef, { ...oldConfig, versionName: newName });
+        batch.delete(oldConfigRef);
+      }
+
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  async deleteAllSchedules(): Promise<void> {
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const configSnapshot = await getDocs(collection(db, CONFIG_COLLECTION));
+      const batch = writeBatch(db);
+      
+      snapshot.forEach(doc => batch.delete(doc.ref));
+      configSnapshot.forEach(doc => batch.delete(doc.ref));
+      
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
+    }
+  }
+};

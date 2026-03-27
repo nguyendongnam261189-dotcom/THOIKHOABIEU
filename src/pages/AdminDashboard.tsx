@@ -82,7 +82,7 @@ export const AdminDashboard: React.FC = () => {
       setFile(null);
       await loadData();
     } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi xử lý file Excel.` });
+      setStatus({ type: 'error', message: error.message || 'Lỗi xử lý file Excel' });
     } finally {
       setLoading(false);
     }

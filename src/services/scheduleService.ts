@@ -1,11 +1,22 @@
-import { collection, doc, getDocs, writeBatch, query, where, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, writeBatch, query, where, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Schedule, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'schedules';
 const CONFIG_COLLECTION = 'version_configs';
-const TEACHERS_COLLECTION = 'teachers'; // Bảng lưu trữ ID giáo viên định danh
+
+// 🔥 TẠO ID DUY NHẤT CHO SCHEDULE
+const generateScheduleId = (schedule: Schedule): string => {
+  const version = schedule.versionName || 'unknown';
+  const teacher = schedule.giao_vien || 'unknown';
+  const thu = schedule.thu;
+  const tiet = schedule.tiet;
+  const buoi = schedule.buoi || '';
+  const lop = schedule.lop || '';
+
+  return `${version}__${teacher}__${lop}__${thu}_${tiet}_${buoi}`;
+};
 
 export const scheduleService = {
   async getAllSchedules(): Promise<Schedule[]> {
@@ -21,7 +32,10 @@ export const scheduleService = {
 
   async getSchedulesByTeacher(teacherName: string): Promise<Schedule[]> {
     try {
-      const q = query(collection(db, COLLECTION_NAME), where('giao_vien', '==', teacherName));
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('giao_vien', '==', teacherName)
+      );
       const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
     } catch (error) {
@@ -33,16 +47,23 @@ export const scheduleService = {
   async saveSchedules(schedules: Schedule[]): Promise<void> {
     try {
       const batch = writeBatch(db);
+
       schedules.forEach(schedule => {
-        const docRef = doc(collection(db, COLLECTION_NAME));
-        batch.set(docRef, schedule);
+        // 🔥 TẠO ID CỐ ĐỊNH
+        const docId = generateScheduleId(schedule);
+
+        const docRef = doc(db, COLLECTION_NAME, docId);
+
+        batch.set(docRef, schedule, { merge: true });
       });
+
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }
   },
 
+  // 🔥 LƯU SỐ TUẦN ÁP DỤNG
   async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
     try {
       const docRef = doc(db, CONFIG_COLLECTION, versionName);
@@ -71,23 +92,18 @@ export const scheduleService = {
     try {
       const snapshot = await getDocs(collection(db, COLLECTION_NAME));
       const batch = writeBatch(db);
-      let count = 0;
-      
+
       snapshot.forEach(document => {
         const data = document.data();
-        const currentVName = data.versionName || 'Không rõ';
-        if (currentVName === versionName) {
+        if (data.versionName === versionName) {
           batch.delete(document.ref);
-          count++;
         }
       });
-      
+
       const configRef = doc(db, CONFIG_COLLECTION, versionName);
       batch.delete(configRef);
-      
-      if (count > 0 || versionName !== 'Không rõ') {
-        await batch.commit();
-      }
+
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
       throw error;
@@ -98,66 +114,52 @@ export const scheduleService = {
     try {
       const snapshot = await getDocs(collection(db, COLLECTION_NAME));
       const batch = writeBatch(db);
-      let count = 0;
 
-      snapshot.forEach((document) => {
+      snapshot.forEach(document => {
         const data = document.data();
-        const currentVName = data.versionName || 'Không rõ';
-        
-        if (currentVName === oldName) {
-          batch.update(document.ref, { versionName: newName });
-          count++;
+        if (data.versionName === oldName) {
+          const newId = generateScheduleId({
+            ...data,
+            versionName: newName
+          } as Schedule);
+
+          const newRef = doc(db, COLLECTION_NAME, newId);
+
+          batch.set(newRef, { ...data, versionName: newName });
+          batch.delete(document.ref);
         }
       });
 
       const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
       const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
-      
-      const configsSnapshot = await getDocs(collection(db, CONFIG_COLLECTION));
-      const oldConfig = configsSnapshot.docs.find(d => d.id === oldName)?.data();
-      
+
+      const configs = await this.getVersionConfigs();
+      const oldConfig = configs.find(c => c.versionName === oldName);
+
       if (oldConfig) {
         batch.set(newConfigRef, { ...oldConfig, versionName: newName });
         batch.delete(oldConfigRef);
       }
 
-      if (count > 0 || oldConfig) {
-        await batch.commit();
-      }
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
       throw error;
     }
   },
 
-  /**
-   * 🔥 HÀM XÓA SẠCH 100% DỮ LIỆU
-   * Quét và xóa sạch 3 bảng: Tiết dạy (schedules), Cấu hình (configs) và Giáo viên (teachers)
-   */
   async deleteAllSchedules(): Promise<void> {
     try {
-      // 1. Lấy dữ liệu từ 3 collection song song
-      const [schSnap, cfgSnap, teaSnap] = await Promise.all([
-        getDocs(collection(db, COLLECTION_NAME)),
-        getDocs(collection(db, CONFIG_COLLECTION)),
-        getDocs(collection(db, TEACHERS_COLLECTION))
-      ]);
-
+      const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const configSnapshot = await getDocs(collection(db, CONFIG_COLLECTION));
       const batch = writeBatch(db);
-      let count = 0;
 
-      // 2. Đưa tất cả vào batch xóa
-      schSnap.forEach(doc => { batch.delete(doc.ref); count++; });
-      cfgSnap.forEach(doc => { batch.delete(doc.ref); count++; });
-      teaSnap.forEach(doc => { batch.delete(doc.ref); count++; });
+      snapshot.forEach(doc => batch.delete(doc.ref));
+      configSnapshot.forEach(doc => batch.delete(doc.ref));
 
-      // 3. Thực thi (Firestore batch giới hạn 500 records, nếu trường thầy cực lớn sẽ cần chia nhỏ thêm)
-      if (count > 0) {
-        await batch.commit();
-      }
+      await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
-      throw error;
     }
   }
 };

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, Trash2, Tag, Edit2, Check, Save, BarChart3, Loader2, X, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, Plus, BarChart3 } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -68,21 +68,21 @@ export const AdminDashboard: React.FC = () => {
 
   const handleUpload = async () => {
     if (!file || !versionName.trim()) {
-      setStatus({ type: 'error', message: 'Vui lòng chọn file và đặt tên phiên bản.' });
+      setStatus({ type: 'error', message: 'Vui lòng chọn file.' });
       return;
     }
     setLoading(true);
     try {
       const { schedules, teachers } = await parseExcelFile(file);
       const labeledSchedules = schedules.map(s => ({ ...s, versionName: versionName.trim() }));
-      await teacherService.mergeTeachers(teachers);
+      await teacherService.saveTeachers(teachers);
       await scheduleService.saveSchedules(labeledSchedules); 
-      setStatus({ type: 'success', message: `Đã cập nhật dữ liệu thành công!` });
+      setStatus({ type: 'success', message: `Đã cập nhật thành công!` });
       setVersionName('');
       setFile(null);
-      await loadData();
+      loadData();
     } catch (error: any) {
-      setStatus({ type: 'error', message: error.message || 'Lỗi xử lý file Excel' });
+      setStatus({ type: 'error', message: `Lỗi xử lý dữ liệu.` });
     } finally {
       setLoading(false);
     }
@@ -91,32 +91,31 @@ export const AdminDashboard: React.FC = () => {
   const handleSaveWeeks = async (vName: string, weeks: number) => {
     try {
       await scheduleService.saveVersionWeeks(vName, weeks);
-      await loadData();
+      loadData();
     } catch (error) {
       alert("Lỗi lưu số tuần.");
     }
   };
 
   const handleRenameVersion = async (oldName: string, newName: string) => {
-    if (!newName.trim()) return;
     setLoading(true);
     try {
       await scheduleService.renameVersion(oldName, newName.trim());
       setEditingVersion(null);
-      await loadData();
+      loadData();
     } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi đổi tên phiên bản.` });
+      setStatus({ type: 'error', message: `Lỗi đổi tên.` });
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteVersion = async (vName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa "${vName}"?`)) return;
+    if (!window.confirm(`Xóa "${vName}"?`)) return;
     setLoading(true);
     try {
       await scheduleService.deleteScheduleByVersion(vName);
-      await loadData();
+      loadData();
     } catch (error: any) {
       setStatus({ type: 'error', message: `Lỗi xóa dữ liệu.` });
     } finally {
@@ -124,23 +123,10 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleFullReset = async () => {
-    setLoading(true);
-    try {
-      await scheduleService.deleteAllSchedules();
-      setAllSchedules([]);
-      setTeachers([]);
-      setVersionConfigs([]);
-      setSelectedKTLops([]);
-      setShowDeleteConfirm(false);
-      setStatus({ type: 'info', message: 'Hệ thống đã được dọn sạch hoàn toàn.' });
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Lỗi khi xóa sạch dữ liệu.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  /**
+   * 🔥 HÀM NHẬN DIỆN THÔNG MINH (CỐ ĐỊNH)
+   * Quét toàn diện các từ khóa đặc thù của tiết HĐTN/Chủ nhiệm
+   */
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || 
@@ -168,13 +154,18 @@ export const AdminDashboard: React.FC = () => {
 
           versions.forEach(v => {
             if (v.weeks <= 0) return;
+            
+            // Lọc tất cả tiết GV này dạy tại các lớp Khuyết tật đã chọn
             const vPeriods = allSchedules.filter(s => 
               s.versionName === v.name && 
               s.giao_vien === teacher.name && 
               s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
             );
+
             if (vPeriods.length === 0) return;
 
+            // PHÂN LOẠI THÔNG MINH:
+            // 1. Tìm những lớp mà GV này có dạy tiết HĐTN/SHL/CC (Dấu hiệu của GVCN)
             const classesAsCN = new Set<string>();
             vPeriods.forEach(p => {
               if (isHDTNType(p.mon)) {
@@ -182,10 +173,13 @@ export const AdminDashboard: React.FC = () => {
               }
             });
 
+            // 2. Tính tiết chuyên môn (Bỏ qua các tiết đã xác định là HĐTN)
             const normalPeriods = vPeriods.filter(p => !isHDTNType(p.mon));
+            
             const classCountMap: Record<string, number> = {};
             let subTotalVersion = 0;
 
+            // Cộng tiết chuyên môn thực tế
             normalPeriods.forEach(p => {
               p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
                 const cleanLop = ml.replace(/\./g, '/');
@@ -195,6 +189,7 @@ export const AdminDashboard: React.FC = () => {
               });
             });
 
+            // Cộng 3 tiết định mức cho mỗi lớp chủ nhiệm
             classesAsCN.forEach(ml => {
               const cleanLop = ml.replace(/\./g, '/');
               const key = `HĐTN (CN) lớp ${cleanLop}`;
@@ -242,26 +237,19 @@ export const AdminDashboard: React.FC = () => {
       const finalWb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(finalWb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG');
       wb.SheetNames.forEach(name => XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name));
-      XLSX.writeFile(finalWb, `Bao_Cao_Khuyet_Tat.xlsx`);
+      XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat_Vinh_Vien.xlsx`);
     } catch (err) { alert("Lỗi xuất file."); }
   };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
+      {/* 1. UPLOAD */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-          {loading ? <Loader2 className="mr-2 text-indigo-600 animate-spin" /> : <Upload className="mr-2 text-indigo-600" />}
-          Nhập dữ liệu TKB
-        </h2>
-        {status && (
-          <div className={`mb-4 p-3 rounded-lg text-sm font-medium flex items-center ${status.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-             <AlertCircle className="w-4 h-4 mr-2" /> {status.message}
-          </div>
-        )}
+        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
         <div className="space-y-4 mb-6">
           <label className="block">
             <span className="text-sm font-bold text-gray-700 flex items-center mb-2"><Tag className="w-4 h-4 mr-2" /> Tên phiên bản:</span>
-            <input type="text" placeholder="Ví dụ: TKB Số 1" className="w-full px-4 py-2 border border-gray-300 rounded-lg" value={versionName} onChange={(e) => setVersionName(e.target.value)} />
+            <input type="text" placeholder="TKB Số..." className="w-full px-4 py-2 border border-gray-300 rounded-lg" value={versionName} onChange={(e) => setVersionName(e.target.value)} />
           </label>
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition-colors">
             <FileSpreadsheet className="mx-auto h-10 w-10 text-gray-400 mb-3" />
@@ -271,21 +259,19 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
         <div className="flex justify-between items-center">
-          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md disabled:bg-gray-400">
-            {loading ? 'Đang tải...' : 'Tải lên hệ thống'}
-          </button>
+          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md">{loading ? 'Đang xử lý...' : 'Tải lên'}</button>
           {!showDeleteConfirm ? (
-            <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm font-medium hover:underline">Xóa sạch dữ liệu</button>
+            <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm underline">Xóa sạch dữ liệu</button>
           ) : (
-            <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-xl border border-red-100">
-              <span className="text-xs text-red-700 font-bold px-2">Xác nhận xóa hết?</span>
-              <button onClick={handleFullReset} className="px-3 py-1 bg-red-600 text-white text-xs rounded-lg font-bold">Xóa 100%</button>
-              <button onClick={() => setShowDeleteConfirm(false)} className="px-3 py-1 bg-white text-xs rounded-lg border border-gray-300 font-bold text-gray-600">Hủy</button>
+            <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-md">
+              <button onClick={async () => { await scheduleService.deleteAllSchedules(); loadData(); setShowDeleteConfirm(false); }} className="px-2 py-1 bg-red-600 text-white text-xs rounded">Xóa 100%</button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="px-2 py-1 bg-white text-xs rounded border">Hủy</button>
             </div>
           )}
         </div>
       </div>
 
+      {/* 2. QUẢN LÝ PHIÊN BẢN */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><Save className="mr-2 text-amber-500" /> Số tuần dạy thực tế</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -309,6 +295,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* 3. XUẤT BÁO CÁO */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-200">
         <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Chế độ Khuyết tật</h3>
         <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl">

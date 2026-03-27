@@ -24,7 +24,7 @@ const extractSubjectAndClass = (text: string) => {
     return { subject: normalizeSubject(subject), lop };
   }
 
-  // dạng "HĐTNHN (7.2)"
+  // dạng "(7.2)"
   const match = t.match(/\(([^)]+)\)/);
   if (match) {
     return {
@@ -33,7 +33,7 @@ const extractSubjectAndClass = (text: string) => {
     };
   }
 
-  return { subject: t, lop: '' };
+  return { subject: '', lop: '' };
 };
 
 const getDepartmentFromSheetName = (name: string) => {
@@ -45,6 +45,25 @@ const getDepartmentFromSheetName = (name: string) => {
   if (n.includes('_TM')) return 'Nghệ thuật - Thể chất';
   if (n.includes('_V')) return 'Văn - GDCD';
   return '';
+};
+
+// 🔥 nhận diện header đúng (có nhiều tên GV)
+const isHeaderRow = (row: any[]) => {
+  const validCells = row.filter(c => {
+    const txt = clean(c);
+    return txt.length >= 3 && !txt.toUpperCase().includes('THỜI');
+  });
+
+  return validCells.length >= 3;
+};
+
+// 🔥 chuẩn hóa short name
+const normalizeShortName = (name: string) => {
+  return name
+    .replace(/\./g, '')
+    .replace(/-/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
 };
 
 // ====== MAIN ======
@@ -69,7 +88,7 @@ export const parseExcelFile = async (file: File) => {
             if (!full) return;
 
             const short = full.split(' ').pop() || full;
-            shortToFull.set(short, full);
+            shortToFull.set(normalizeShortName(short), full);
           });
         }
 
@@ -83,11 +102,11 @@ export const parseExcelFile = async (file: File) => {
           const group = getDepartmentFromSheetName(sheetName);
           const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 }) as any[];
 
-          // tìm header row (có tên giáo viên)
+          // ===== tìm header đúng =====
           let headerRowIndex = -1;
           for (let i = 0; i < 10; i++) {
             const row = data[i] || [];
-            if (row.some(c => clean(c).length > 2)) {
+            if (isHeaderRow(row)) {
               headerRowIndex = i;
               break;
             }
@@ -99,10 +118,11 @@ export const parseExcelFile = async (file: File) => {
 
           // ===== duyệt theo CỘT =====
           for (let col = 0; col < headers.length; col++) {
-            const shortName = clean(headers[col]);
-            if (!shortName || shortName.length < 2) continue;
+            const rawName = clean(headers[col]);
+            if (!rawName || rawName.length < 2) continue;
 
-            const fullName = shortToFull.get(shortName.split('.').pop() || shortName) || shortName;
+            const shortKey = normalizeShortName(rawName);
+            const fullName = shortToFull.get(shortKey) || rawName;
 
             if (!teacherMap.has(fullName)) {
               teacherMap.set(fullName, {
@@ -111,12 +131,19 @@ export const parseExcelFile = async (file: File) => {
               });
             }
 
-            // ===== duyệt xuống dưới =====
+            // ===== duyệt xuống =====
             for (let row = headerRowIndex + 1; row < data.length; row++) {
               const cell = clean(data[row][col]);
               if (!cell) continue;
 
-              if (cell.toUpperCase().includes('THỜI') || cell.toUpperCase().includes('BUỔI')) continue;
+              const upper = cell.toUpperCase();
+
+              // bỏ rác
+              if (
+                upper.includes('THỜI') ||
+                upper.includes('BUỔI') ||
+                upper.includes('TRƯỜNG')
+              ) continue;
 
               const { subject, lop } = extractSubjectAndClass(cell);
 
@@ -126,7 +153,7 @@ export const parseExcelFile = async (file: File) => {
 
               schedules.push({
                 giao_vien: fullName,
-                lop,
+                lop: lop.replace('.', '/'),
                 mon: subject,
                 thu: 0,
                 tiet: 0,
@@ -143,7 +170,7 @@ export const parseExcelFile = async (file: File) => {
           teachers.push({
             name,
             subject: Array.from(data.subjects).join(', '),
-            group: data.group
+            group: data.group || 'Chưa phân tổ'
           });
         });
 

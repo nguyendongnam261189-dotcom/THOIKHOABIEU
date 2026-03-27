@@ -1,183 +1,180 @@
 import * as XLSX from 'xlsx';
 import { Schedule, Teacher } from '../types';
 
-// ====== UTIL ======
-
-const clean = (s: any) => String(s || '').normalize('NFC').trim();
-
-const normalizeSubject = (s: string) => {
-  const str = s.toUpperCase().replace(/\s+/g, '');
-  if (str.includes('HĐTN')) return 'HĐTN';
-  return s.trim();
+const getDepartmentFromSheetName = (sheetName: string): string => {
+  const name = sheetName.toUpperCase();
+  if (name.includes('_NN')) return 'Ngoại ngữ';
+  if (name.includes('_KHTN') || name.includes('_CN_') || name.endsWith('_CN')) return 'KHTN và Công nghệ';
+  if (name.includes('_SĐ') || name.includes('_SD')) return 'Sử - Địa';
+  if (name.includes('_T_') || name.endsWith('_T')) return 'Toán - Tin';
+  if (name.includes('_TM')) return 'Nghệ thuật - Thể chất';
+  if (name.includes('_V_') || name.endsWith('_V')) return 'Văn - GDCD';
+  return 'Chung';
 };
 
-const extractSubjectAndClass = (text: string) => {
-  if (!text) return { subject: '', lop: '' };
-
-  let t = text.replace(/\s+/g, ' ').trim();
-
-  // dạng "AVăn - 7.1"
-  if (t.includes('-')) {
-    const parts = t.split('-');
-    const lop = parts.pop()?.trim() || '';
-    const subject = parts.join('-').trim();
-    return { subject: normalizeSubject(subject), lop };
-  }
-
-  // dạng "(7.2)"
-  const match = t.match(/\(([^)]+)\)/);
-  if (match) {
-    return {
-      subject: normalizeSubject(t.replace(match[0], '').trim()),
-      lop: match[1].trim()
-    };
-  }
-
-  return { subject: '', lop: '' };
+const inferDepartmentFromSubject = (subject: string): string | null => {
+  if (!subject) return null;
+  const s = subject.toUpperCase();
+  if (s.includes('TOÁN') || s.includes('TIN')) return 'Toán - Tin';
+  if (s.includes('VĂN') || s.includes('GDCD')) return 'Văn - GDCD';
+  if (s.includes('ANH') || s.includes('AVĂN')) return 'Ngoại ngữ';
+  if (s.includes('KHTN') || s.includes('HÓA') || s.includes('LÝ') || s.includes('SINH') || s.includes('CÔNG NGHỆ') || s.includes('CNGHỆ')) return 'KHTN và Công nghệ';
+  if (s.includes('SỬ') || s.includes('ĐỊA') || s.includes('NDGDĐP') || s.includes('NDGĐP') || s.includes('LỊCH SỬ') || s.includes('ĐỊA LÝ')) return 'Sử - Địa';
+  if (s.includes('GDTC') || s.includes('THỂ DỤC') || s.includes('NGHỆ THUẬT') || s.includes('ÂM NHẠC') || s.includes('MỸ THUẬT')) return 'Nghệ thuật - Thể chất';
+  return null;
 };
 
-const getDepartmentFromSheetName = (name: string) => {
-  const n = name.toUpperCase();
-  if (n.includes('_NN')) return 'Ngoại ngữ';
-  if (n.includes('_KHTN') || n.includes('_CN')) return 'KHTN và Công nghệ';
-  if (n.includes('_SD')) return 'Sử - Địa';
-  if (n.includes('_T')) return 'Toán - Tin';
-  if (n.includes('_TM')) return 'Nghệ thuật - Thể chất';
-  if (n.includes('_V')) return 'Văn - GDCD';
-  return '';
+const formatClassName = (className: any): string => {
+  if (!className) return '';
+  let str = String(className).trim();
+  return str.replace(/\./g, '/').replace(/\s+/g, '');
 };
 
-// 🔥 nhận diện header đúng (có nhiều tên GV)
-const isHeaderRow = (row: any[]) => {
-  const validCells = row.filter(c => {
-    const txt = clean(c);
-    return txt.length >= 3 && !txt.toUpperCase().includes('THỜI');
-  });
-
-  return validCells.length >= 3;
+const cleanString = (str: any): string => {
+  if (str === null || str === undefined) return '';
+  return String(str).normalize('NFC').trim();
 };
 
-// 🔥 chuẩn hóa short name
-const normalizeShortName = (name: string) => {
-  return name
-    .replace(/\./g, '')
-    .replace(/-/g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-};
+export const parseExcelFile = async (
+  file: File,
+  versionName: string // 🔥 THÊM
+): Promise<{ schedules: Schedule[], teachers: Teacher[] }> => {
 
-// ====== MAIN ======
-
-export const parseExcelFile = async (file: File) => {
-  return new Promise<{ schedules: Schedule[], teachers: Teacher[] }>((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(new Uint8Array(e.target?.result as ArrayBuffer), { type: 'array' });
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
 
-        // ===== 1. MAP SHORT → FULL =====
-        const shortToFull = new Map<string, string>();
+        let uniqueSchedules: Map<string, Schedule> = new Map();
+        let allTeachersMap: Map<string, Teacher> = new Map();
 
-        const pcgd = wb.SheetNames.find(n => n.toUpperCase().includes('PCGD'));
-        if (pcgd) {
-          const data = XLSX.utils.sheet_to_json(wb.Sheets[pcgd], { header: 1 }) as any[];
+        // ===== 1. MAP TỔ =====
+        const teacherDepartmentDict = new Map<string, string>();
 
-          data.forEach(r => {
-            const full = clean(r[1] || r[0]);
-            if (!full) return;
+        workbook.SheetNames.forEach(sheetName => {
+          if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
+            const department = getDepartmentFromSheetName(sheetName);
+            if (department === 'Chung') return;
 
-            const short = full.split(' ').pop() || full;
-            shortToFull.set(normalizeShortName(short), full);
-          });
-        }
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
 
-        // ===== 2. PARSE =====
-        const schedules: Schedule[] = [];
-        const teacherMap = new Map<string, { subjects: Set<string>, group: string }>();
+            for (let i = 0; i < Math.min(15, jsonData.length); i++) {
+              const row = jsonData[i] || [];
+              const rowStr = row.map((c: any) => String(c).toLowerCase()).join('');
+              if (rowStr.includes('thứ') || rowStr.includes('tiết')) {
+                for (let c = 2; c < row.length; c++) {
+                  let teacherName = cleanString(row[c]);
+                  if (teacherName) {
+                    teacherDepartmentDict.set(teacherName, department);
+                  }
+                }
+                break;
+              }
+            }
+          }
+        });
 
-        wb.SheetNames.forEach(sheetName => {
+        // ===== 2. SUBJECT LIST (giữ nguyên) =====
+        const knownSubjects = new Set<string>();
+        ['Toán','Văn','Anh','AVăn','Lý','Hóa','Sinh','Sử','Địa','GDCD','Tin','CNghệ','Công nghệ','GDTC','Thể dục','Nghệ thuật','Âm nhạc','Mỹ thuật','KHTN','HĐTNHN','CC-HĐTNHN','SHL','Chào cờ']
+        .forEach(s => knownSubjects.add(s));
+
+        const sortedKnownSubjects = Array.from(knownSubjects).sort((a,b)=>b.length-a.length);
+
+        // ===== 3. PARSE =====
+        workbook.SheetNames.forEach(sheetName => {
+
           if (sheetName.toUpperCase().includes('PCGD')) return;
 
-          const group = getDepartmentFromSheetName(sheetName);
-          const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 }) as any[];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
 
-          // ===== tìm header đúng =====
-          let headerRowIndex = -1;
-          for (let i = 0; i < 10; i++) {
-            const row = data[i] || [];
-            if (isHeaderRow(row)) {
-              headerRowIndex = i;
+          let headerRowIdx = -1, thuColIdx=-1, tietColIdx=-1;
+
+          for (let i = 0; i < 15; i++) {
+            const row = jsonData[i] || [];
+            for (let c=0;c<row.length;c++){
+              const str = cleanString(row[c]).toLowerCase();
+              if(str.includes('thứ')) thuColIdx = c;
+              if(str.includes('tiết')) tietColIdx = c;
+            }
+            if(thuColIdx!==-1 && tietColIdx!==-1){
+              headerRowIdx = i;
               break;
             }
           }
 
-          if (headerRowIndex === -1) return;
+          if (headerRowIdx === -1) return;
 
-          const headers = data[headerRowIndex];
+          const headerRow = jsonData[headerRowIdx];
 
-          // ===== duyệt theo CỘT =====
-          for (let col = 0; col < headers.length; col++) {
-            const rawName = clean(headers[col]);
-            if (!rawName || rawName.length < 2) continue;
+          for(let c=0;c<headerRow.length;c++){
+            if(c===thuColIdx||c===tietColIdx) continue;
 
-            const shortKey = normalizeShortName(rawName);
-            const fullName = shortToFull.get(shortKey) || rawName;
+            const teacherShort = cleanString(headerRow[c]);
+            if(!teacherShort) continue;
 
-            if (!teacherMap.has(fullName)) {
-              teacherMap.set(fullName, {
-                subjects: new Set(),
-                group
-              });
-            }
+            for(let r=headerRowIdx+1;r<jsonData.length;r++){
 
-            // ===== duyệt xuống =====
-            for (let row = headerRowIndex + 1; row < data.length; row++) {
-              const cell = clean(data[row][col]);
-              if (!cell) continue;
+              const row = jsonData[r] || [];
+              const tiet = parseInt(cleanString(row[tietColIdx]));
+              if(isNaN(tiet)) continue;
 
-              const upper = cell.toUpperCase();
+              const cell = cleanString(row[c]);
+              if(!cell) continue;
 
-              // bỏ rác
-              if (
-                upper.includes('THỜI') ||
-                upper.includes('BUỔI') ||
-                upper.includes('TRƯỜNG')
-              ) continue;
+              let subject='', lop='';
 
-              const { subject, lop } = extractSubjectAndClass(cell);
+              const match = sortedKnownSubjects.find(s=>cell.toUpperCase().startsWith(s.toUpperCase()));
+              if(match){
+                subject = match;
+                lop = cell.substring(match.length).replace(/[-\s]/g,'').trim();
+              }
 
-              if (!subject || !lop) continue;
+              if(!subject) continue;
 
-              teacherMap.get(fullName)!.subjects.add(subject);
+              const teacherGroup =
+                teacherDepartmentDict.get(teacherShort)
+                || inferDepartmentFromSubject(subject)
+                || 'Chưa phân tổ';
 
-              schedules.push({
-                giao_vien: fullName,
-                lop: lop.replace('.', '/'),
+              const schedule: Schedule = {
+                giao_vien: teacherShort,
+                lop: formatClassName(lop),
                 mon: subject,
                 thu: 0,
-                tiet: 0,
-                buoi: '',
-              } as Schedule);
+                tiet: tiet>5?tiet-5:tiet,
+                buoi: tiet>5?'Chiều':'Sáng',
+                versionName // 🔥 THÊM
+              };
+
+              const key = `${schedule.thu}-${schedule.buoi}-${schedule.tiet}-${schedule.giao_vien}-${schedule.mon}`;
+
+              uniqueSchedules.set(key, schedule);
+
+              if(!allTeachersMap.has(teacherShort)){
+                allTeachersMap.set(teacherShort,{
+                  name: teacherShort,
+                  subject: subject,
+                  group: teacherGroup,
+                  versionName // 🔥 THÊM
+                } as Teacher);
+              }
             }
           }
         });
 
-        // ===== 3. BUILD TEACHERS =====
-        const teachers: Teacher[] = [];
-
-        teacherMap.forEach((data, name) => {
-          teachers.push({
-            name,
-            subject: Array.from(data.subjects).join(', '),
-            group: data.group || 'Chưa phân tổ'
-          });
+        resolve({
+          schedules: Array.from(uniqueSchedules.values()),
+          teachers: Array.from(allTeachersMap.values())
         });
 
-        resolve({ schedules, teachers });
-
-      } catch (err) {
-        reject(err);
+      } catch (error) {
+        reject(error);
       }
     };
 

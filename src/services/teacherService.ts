@@ -1,25 +1,15 @@
-import { collection, doc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Teacher, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'teachers';
 
-// 🔥 FIX: sanitize ID
-const safeString = (str: string): string => {
-  return (str || '')
-    .replace(/\//g, '_')   // bỏ dấu /
-    .replace(/#/g, '')
-    .replace(/\?/g, '')
-    .replace(/\s+/g, '_')  // space → _
-    .trim();
-};
-
+// 🔥 tạo ID ổn định
 const generateTeacherId = (teacher: Teacher): string => {
-  const name = safeString(teacher.name);
-  const group = safeString(teacher.group);
-
-  return `${name}__${group}`;
+  return `${teacher.name}__${teacher.group}__${teacher.versionName || 'default'}`
+    .replace(/\s+/g, '_')
+    .replace(/\//g, '_');
 };
 
 export const teacherService = {
@@ -33,18 +23,52 @@ export const teacherService = {
     }
   },
 
-  async mergeTeachers(teachers: Teacher[]): Promise<void> {
+  // 🔥 lấy theo version (quan trọng cho UI)
+  async getTeachersByVersion(versionName: string): Promise<Teacher[]> {
+    try {
+      const q = query(
+        collection(db, COLLECTION_NAME),
+        where('versionName', '==', versionName)
+      );
+
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Teacher));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
+      return [];
+    }
+  },
+
+  async saveTeachers(teachers: Teacher[], versionName: string): Promise<void> {
     try {
       const batch = writeBatch(db);
 
-      teachers.forEach(teacher => {
-        const docId = generateTeacherId(teacher);
-        const docRef = doc(db, COLLECTION_NAME, docId);
+      // 🔥 XÓA CHỈ TEACHER CỦA VERSION NÀY
+      const existingQuery = query(
+        collection(db, COLLECTION_NAME),
+        where('versionName', '==', versionName)
+      );
 
-        batch.set(docRef, teacher, { merge: true });
+      const existingDocs = await getDocs(existingQuery);
+      existingDocs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+      });
+
+      // 🔥 ADD MỚI
+      teachers.forEach(teacher => {
+        const teacherWithVersion = {
+          ...teacher,
+          versionName
+        };
+
+        const id = generateTeacherId(teacherWithVersion);
+        const ref = doc(db, COLLECTION_NAME, id);
+
+        batch.set(ref, teacherWithVersion);
       });
 
       await batch.commit();
+
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }

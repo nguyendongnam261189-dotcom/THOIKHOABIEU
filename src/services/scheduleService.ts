@@ -6,14 +6,24 @@ import { handleFirestoreError } from './firebaseUtils';
 const COLLECTION_NAME = 'schedules';
 const CONFIG_COLLECTION = 'version_configs';
 
+// 🔥 sanitize an toàn cho Firestore ID
+const safeString = (str: string): string => {
+  return (str || '')
+    .replace(/\//g, '_')      // bỏ dấu /
+    .replace(/#/g, '')
+    .replace(/\?/g, '')
+    .replace(/\s+/g, '_')     // space → _
+    .trim();
+};
+
 // 🔥 TẠO ID DUY NHẤT CHO SCHEDULE
 const generateScheduleId = (schedule: Schedule): string => {
-  const version = schedule.versionName || 'unknown';
-  const teacher = schedule.giao_vien || 'unknown';
+  const version = safeString(schedule.versionName || 'unknown');
+  const teacher = safeString(schedule.giao_vien || 'unknown');
   const thu = schedule.thu;
   const tiet = schedule.tiet;
-  const buoi = schedule.buoi || '';
-  const lop = schedule.lop || '';
+  const buoi = safeString(schedule.buoi || '');
+  const lop = safeString(schedule.lop || '');
 
   return `${version}__${teacher}__${lop}__${thu}_${tiet}_${buoi}`;
 };
@@ -49,9 +59,7 @@ export const scheduleService = {
       const batch = writeBatch(db);
 
       schedules.forEach(schedule => {
-        // 🔥 TẠO ID CỐ ĐỊNH
         const docId = generateScheduleId(schedule);
-
         const docRef = doc(db, COLLECTION_NAME, docId);
 
         batch.set(docRef, schedule, { merge: true });
@@ -63,10 +71,11 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 LƯU SỐ TUẦN ÁP DỤNG
   async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
     try {
-      const docRef = doc(db, CONFIG_COLLECTION, versionName);
+      const safeVersion = safeString(versionName);
+      const docRef = doc(db, CONFIG_COLLECTION, safeVersion);
+
       await setDoc(docRef, {
         versionName,
         appliedWeeks: weeks,
@@ -100,7 +109,7 @@ export const scheduleService = {
         }
       });
 
-      const configRef = doc(db, CONFIG_COLLECTION, versionName);
+      const configRef = doc(db, CONFIG_COLLECTION, safeString(versionName));
       batch.delete(configRef);
 
       await batch.commit();
@@ -117,6 +126,7 @@ export const scheduleService = {
 
       snapshot.forEach(document => {
         const data = document.data();
+
         if (data.versionName === oldName) {
           const newId = generateScheduleId({
             ...data,
@@ -130,8 +140,8 @@ export const scheduleService = {
         }
       });
 
-      const oldConfigRef = doc(db, CONFIG_COLLECTION, oldName);
-      const newConfigRef = doc(db, CONFIG_COLLECTION, newName);
+      const oldConfigRef = doc(db, CONFIG_COLLECTION, safeString(oldName));
+      const newConfigRef = doc(db, CONFIG_COLLECTION, safeString(newName));
 
       const configs = await this.getVersionConfigs();
       const oldConfig = configs.find(c => c.versionName === oldName);

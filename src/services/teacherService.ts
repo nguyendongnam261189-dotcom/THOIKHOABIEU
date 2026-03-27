@@ -1,15 +1,24 @@
-import { collection, doc, setDoc, getDocs, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Teacher, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'teachers';
 
-// 🔥 tạo ID ổn định
-const generateTeacherId = (teacher: Teacher): string => {
-  return `${teacher.name}__${teacher.group}__${teacher.versionName || 'default'}`
-    .replace(/\s+/g, '_')
-    .replace(/\//g, '_');
+/**
+ * 🔥 HÀM TẠO ID CỐ ĐỊNH TỪ TÊN ĐÃ PHÂN TÍCH
+ * Giúp gộp "Hải" và "Nguyễn Ngọc Hải" hoặc phân biệt 2 cô Vân.
+ */
+const generateTeacherId = (name: string): string => {
+  if (!name) return 'unknown';
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .trim();
 };
 
 export const teacherService = {
@@ -23,54 +32,50 @@ export const teacherService = {
     }
   },
 
-  // 🔥 lấy theo version (quan trọng cho UI)
-  async getTeachersByVersion(versionName: string): Promise<Teacher[]> {
-    try {
-      const q = query(
-        collection(db, COLLECTION_NAME),
-        where('versionName', '==', versionName)
-      );
-
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Teacher));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
-      return [];
-    }
-  },
-
-  async saveTeachers(teachers: Teacher[], versionName: string): Promise<void> {
+  async saveTeachers(teachers: Teacher[]): Promise<void> {
     try {
       const batch = writeBatch(db);
-
-      // 🔥 XÓA CHỈ TEACHER CỦA VERSION NÀY
-      const existingQuery = query(
-        collection(db, COLLECTION_NAME),
-        where('versionName', '==', versionName)
-      );
-
-      const existingDocs = await getDocs(existingQuery);
-      existingDocs.forEach(docSnap => {
-        batch.delete(docSnap.ref);
+      
+      // 1. Lấy dữ liệu hiện có trên Firebase để đối soát tổ chuyên môn
+      const existingSnapshot = await getDocs(collection(db, COLLECTION_NAME));
+      const existingMap = new Map();
+      existingSnapshot.forEach(doc => {
+        existingMap.set(doc.id, doc.data());
       });
 
-      // 🔥 ADD MỚI
+      // 2. Xử lý danh sách giáo viên mới từ Excel
       teachers.forEach(teacher => {
-        const teacherWithVersion = {
+        if (!teacher.name) return;
+
+        const tId = generateTeacherId(teacher.name);
+        const docRef = doc(db, COLLECTION_NAME, tId);
+        const oldData = existingMap.get(tId);
+
+        // Giữ lại tên dài nhất (Ưu tiên tên đầy đủ từ PCGD so với tên viết tắt TKB)
+        let finalName = teacher.name;
+        if (oldData && oldData.name && oldData.name.length > teacher.name.length) {
+          finalName = oldData.name;
+        }
+
+        // Bảo vệ tổ chuyên môn: Nếu cũ đã có tổ xịn, mới là "Chung" thì lấy cái cũ
+        let finalGroup = teacher.group || 'Chung';
+        if (oldData && oldData.group && oldData.group !== 'Chung' && finalGroup === 'Chung') {
+          finalGroup = oldData.group;
+        }
+
+        // 3. Ghi dữ liệu bằng SET MERGE (Không xóa cũ, chỉ cập nhật hoặc thêm mới)
+        batch.set(docRef, {
           ...teacher,
-          versionName
-        };
-
-        const id = generateTeacherId(teacherWithVersion);
-        const ref = doc(db, COLLECTION_NAME, id);
-
-        batch.set(ref, teacherWithVersion);
+          id: tId,
+          name: finalName,
+          group: finalGroup
+        }, { merge: true });
       });
 
       await batch.commit();
-
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+      throw error;
     }
   },
 

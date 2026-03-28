@@ -6,12 +6,28 @@ import { handleFirestoreError } from './firebaseUtils';
 const COLLECTION_NAME = 'schedules';
 const CONFIG_COLLECTION = 'version_configs'; // 🔥 Collection mới để lưu số tuần
 
+// 🔥 BIẾN LƯU TRÍ NHỚ TẠM (CACHE) - GIÚP TIẾT KIỆM QUOTA FIREBASE
+let cachedSchedules: Schedule[] | null = null;
+let cacheTimestamp = 0;
+const CACHE_DURATION = 1000 * 60 * 30; // Nhớ trong 30 phút
+
 export const scheduleService = {
   async getAllSchedules(): Promise<Schedule[]> {
+    // Nếu đã có dữ liệu trong bộ nhớ tạm và chưa quá 30 phút -> Dùng luôn, không gọi Firebase
+    if (cachedSchedules && (Date.now() - cacheTimestamp < CACHE_DURATION)) {
+      return cachedSchedules;
+    }
+
     try {
       const q = query(collection(db, COLLECTION_NAME));
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Schedule));
+      
+      // Lưu vào bộ nhớ tạm
+      cachedSchedules = data;
+      cacheTimestamp = Date.now();
+      
+      return data;
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, COLLECTION_NAME);
       return [];
@@ -37,6 +53,8 @@ export const scheduleService = {
         batch.set(docRef, schedule);
       });
       await batch.commit();
+      
+      cachedSchedules = null; // 🔥 Xóa trí nhớ tạm khi có dữ liệu mới
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }
@@ -89,6 +107,7 @@ export const scheduleService = {
       
       if (count > 0 || versionName !== 'Không rõ') {
         await batch.commit();
+        cachedSchedules = null; // 🔥 Xóa trí nhớ tạm
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
@@ -127,6 +146,7 @@ export const scheduleService = {
 
       if (count > 0) {
         await batch.commit();
+        cachedSchedules = null; // 🔥 Xóa trí nhớ tạm
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
@@ -144,6 +164,7 @@ export const scheduleService = {
       configSnapshot.forEach(doc => batch.delete(doc.ref));
       
       await batch.commit();
+      cachedSchedules = null; // 🔥 Xóa trí nhớ tạm
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, COLLECTION_NAME);
     }

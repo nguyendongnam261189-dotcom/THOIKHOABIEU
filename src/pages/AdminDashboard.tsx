@@ -66,6 +66,41 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  /**
+   * 🔥 THUẬT TOÁN DỌN RÁC (GARBAGE COLLECTION)
+   * Kích hoạt tự động để xóa những giáo viên không còn tồn tại trong bất kỳ TKB nào
+   */
+  const garbageCollectTeachers = async () => {
+    try {
+      // 1. Lấy tất cả lịch dạy của TẤT CẢ phiên bản hiện có
+      const currentSchedules = await scheduleService.getAllSchedules();
+      const activeNames = new Set(currentSchedules.map(s => s.giao_vien));
+      
+      // 2. Lấy toàn bộ danh bạ Giáo viên
+      const currentTeachers = await teacherService.getAllTeachers();
+
+      // 3. Quét và xóa các "Bóng ma"
+      const deletePromises: Promise<void>[] = [];
+      for (const t of currentTeachers) {
+        if (!activeNames.has(t.name) && t.id) {
+          // Ép kiểu any để tránh lỗi TypeScript nếu chưa khai báo hàm trong interface
+          if (typeof (teacherService as any).deleteTeacher === 'function') {
+            deletePromises.push((teacherService as any).deleteTeacher(t.id));
+          } else {
+            console.warn("Hệ thống cần hàm deleteTeacher trong teacherService để dọn rác.");
+          }
+        }
+      }
+      
+      if (deletePromises.length > 0) {
+        await Promise.all(deletePromises);
+        console.log(`Đã tự động dọn dẹp ${deletePromises.length} hồ sơ giáo viên rác.`);
+      }
+    } catch (error) {
+      console.error("Lỗi dọn rác GV:", error);
+    }
+  };
+
   const handleUpload = async () => {
     if (!file || !versionName.trim()) {
       setStatus({ type: 'error', message: 'Vui lòng chọn file.' });
@@ -75,8 +110,14 @@ export const AdminDashboard: React.FC = () => {
     try {
       const { schedules, teachers } = await parseExcelFile(file);
       const labeledSchedules = schedules.map(s => ({ ...s, versionName: versionName.trim() }));
-      await teacherService.saveTeachers(teachers);
+      
+      // 1. Lưu TKB mới
       await scheduleService.saveSchedules(labeledSchedules); 
+      // 2. Lưu/Cập nhật Giáo viên mới (Upsert)
+      await teacherService.saveTeachers(teachers);
+      // 3. Quét dọn các giáo viên bị mất việc (nếu file Excel mới làm họ biến mất)
+      await garbageCollectTeachers();
+
       setStatus({ type: 'success', message: `Đã cập nhật thành công!` });
       setVersionName('');
       setFile(null);
@@ -114,7 +155,11 @@ export const AdminDashboard: React.FC = () => {
     if (!window.confirm(`Xóa "${vName}"?`)) return;
     setLoading(true);
     try {
+      // 1. Xóa TKB của phiên bản này
       await scheduleService.deleteScheduleByVersion(vName);
+      // 2. Tự động dọn rác (Xóa luôn những GV chỉ dạy ở duy nhất phiên bản vừa xóa)
+      await garbageCollectTeachers();
+      
       loadData();
     } catch (error: any) {
       setStatus({ type: 'error', message: `Lỗi xóa dữ liệu.` });
@@ -123,10 +168,27 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  /**
-   * 🔥 HÀM NHẬN DIỆN THÔNG MINH (CỐ ĐỊNH)
-   * Quét toàn diện các từ khóa đặc thù của tiết HĐTN/Chủ nhiệm
-   */
+  const handleDeleteAll = async () => {
+    setLoading(true);
+    try {
+      // 1. Xóa sạch 100% Lịch dạy
+      await scheduleService.deleteAllSchedules();
+      
+      // 2. Xóa sạch 100% Giáo viên
+      const allT = await teacherService.getAllTeachers();
+      if (typeof (teacherService as any).deleteTeacher === 'function') {
+        await Promise.all(allT.map(t => (teacherService as any).deleteTeacher(t.id)));
+      }
+      
+      await loadData();
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Lỗi xóa dữ liệu' });
+    } finally {
+      setLoading(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || 
@@ -155,7 +217,6 @@ export const AdminDashboard: React.FC = () => {
           versions.forEach(v => {
             if (v.weeks <= 0) return;
             
-            // Lọc tất cả tiết GV này dạy tại các lớp Khuyết tật đã chọn
             const vPeriods = allSchedules.filter(s => 
               s.versionName === v.name && 
               s.giao_vien === teacher.name && 
@@ -164,8 +225,6 @@ export const AdminDashboard: React.FC = () => {
 
             if (vPeriods.length === 0) return;
 
-            // PHÂN LOẠI THÔNG MINH:
-            // 1. Tìm những lớp mà GV này có dạy tiết HĐTN/SHL/CC (Dấu hiệu của GVCN)
             const classesAsCN = new Set<string>();
             vPeriods.forEach(p => {
               if (isHDTNType(p.mon)) {
@@ -173,13 +232,11 @@ export const AdminDashboard: React.FC = () => {
               }
             });
 
-            // 2. Tính tiết chuyên môn (Bỏ qua các tiết đã xác định là HĐTN)
             const normalPeriods = vPeriods.filter(p => !isHDTNType(p.mon));
             
             const classCountMap: Record<string, number> = {};
             let subTotalVersion = 0;
 
-            // Cộng tiết chuyên môn thực tế
             normalPeriods.forEach(p => {
               p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
                 const cleanLop = ml.replace(/\./g, '/');
@@ -189,7 +246,6 @@ export const AdminDashboard: React.FC = () => {
               });
             });
 
-            // Cộng 3 tiết định mức cho mỗi lớp chủ nhiệm
             classesAsCN.forEach(ml => {
               const cleanLop = ml.replace(/\./g, '/');
               const key = `HĐTN (CN) lớp ${cleanLop}`;
@@ -246,6 +302,14 @@ export const AdminDashboard: React.FC = () => {
       {/* 1. UPLOAD */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
+        
+        {status && (
+          <div className={`p-4 mb-6 rounded-xl text-sm font-medium border ${status.type === 'success' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            {status.type === 'success' ? <CheckCircle className="inline mr-2 w-5 h-5" /> : <AlertCircle className="inline mr-2 w-5 h-5" />}
+            {status.message}
+          </div>
+        )}
+
         <div className="space-y-4 mb-6">
           <label className="block">
             <span className="text-sm font-bold text-gray-700 flex items-center mb-2"><Tag className="w-4 h-4 mr-2" /> Tên phiên bản:</span>
@@ -259,13 +323,15 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
         <div className="flex justify-between items-center">
-          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md">{loading ? 'Đang xử lý...' : 'Tải lên'}</button>
+          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md disabled:bg-gray-400">
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Tải lên'}
+          </button>
           {!showDeleteConfirm ? (
-            <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm underline">Xóa sạch dữ liệu</button>
+            <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm font-bold underline">Xóa sạch dữ liệu</button>
           ) : (
-            <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-md">
-              <button onClick={async () => { await scheduleService.deleteAllSchedules(); loadData(); setShowDeleteConfirm(false); }} className="px-2 py-1 bg-red-600 text-white text-xs rounded">Xóa 100%</button>
-              <button onClick={() => setShowDeleteConfirm(false)} className="px-2 py-1 bg-white text-xs rounded border">Hủy</button>
+            <div className="flex items-center space-x-2 bg-red-50 p-2 rounded-lg border border-red-200">
+              <button onClick={handleDeleteAll} disabled={loading} className="px-3 py-1.5 bg-red-600 text-white font-bold text-sm rounded-md shadow hover:bg-red-700">{loading ? 'Đang xóa...' : 'Xóa 100%'}</button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="px-3 py-1.5 bg-white text-gray-700 font-bold text-sm rounded-md border shadow-sm hover:bg-gray-50">Hủy</button>
             </div>
           )}
         </div>
@@ -283,31 +349,33 @@ export const AdminDashboard: React.FC = () => {
                 ) : (
                   <div className="flex items-center"><span className="font-bold text-gray-700">{v.name}</span><button onClick={() => { setEditingVersion(v.name); setNewVersionName(v.name); }} className="ml-2 text-gray-400 opacity-0 group-hover:opacity-100"><Edit2 className="w-3 h-3" /></button></div>
                 )}
-                <button onClick={() => handleDeleteVersion(v.name)} className="text-red-400 opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={() => handleDeleteVersion(v.name)} className="text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-4 h-4 hover:text-red-600" /></button>
               </div>
-              <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-100">
-                <span className="text-xs text-gray-500">Dạy:</span>
-                <input type="number" className="w-16 border-b-2 text-center font-bold text-indigo-700 outline-none" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
-                <span className="text-xs text-gray-500">tuần</span>
+              <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
+                <span className="text-xs text-gray-500 font-medium">Dạy:</span>
+                <input type="number" className="w-16 border-b-2 border-indigo-200 text-center font-bold text-indigo-700 outline-none focus:border-indigo-600" defaultValue={v.weeks} onBlur={(e) => handleSaveWeeks(v.name, parseInt(e.target.value) || 0)} />
+                <span className="text-xs text-gray-500 font-medium">tuần</span>
               </div>
             </div>
           ))}
+          {versions.length === 0 && <p className="text-gray-400 italic text-sm col-span-2">Chưa có phiên bản TKB nào.</p>}
         </div>
       </div>
 
       {/* 3. XUẤT BÁO CÁO */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-200">
         <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Chế độ Khuyết tật</h3>
-        <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl">
+        <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl border border-gray-100">
           {allClassNames.map(lop => (
             <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-emerald-600 text-white border-emerald-600 shadow-md transform scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400 hover:text-emerald-700'}`}>
               {lop.replace(/\./g, '/')}
             </button>
           ))}
+          {allClassNames.length === 0 && <p className="text-gray-400 italic text-sm">Vui lòng tải TKB lên để hiển thị danh sách lớp.</p>}
         </div>
         <button onClick={exportIntegratedReport} disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg">
+          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg transition-colors">
           <FileSpreadsheet className="inline mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO CỐ ĐỊNH (TỰ NHẬN DIỆN GVCN)
         </button>
       </div>

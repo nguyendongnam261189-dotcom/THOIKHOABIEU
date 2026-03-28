@@ -146,18 +146,18 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
               const val2 = cleanString(headerRow2[c]);
               if (c === thuColIdx || c === tietColIdx) continue;
               
-              // 🔥 ĐÂY LÀ CHỐT CHẶN CHỐNG TRÀN CỘT (FIX LỖI NHỚ DAI TÊN GIÁO VIÊN)
               if (val1 && val1.toLowerCase() !== 'sáng' && val1.toLowerCase() !== 'chiều') {
                 currentHeader = val1.replace(/\s*\(.*\)/, '').trim(); 
                 const match = val1.match(/\((.*?)\)/);
                 currentHomeroomTeacher = match ? match[1].trim() : '';
-              } else if (!val1 && val2.toLowerCase() !== 'sáng' && val2.toLowerCase() !== 'chiều') {
+              } 
+              // 🔥 ĐÂY LÀ CHỐT CHẶN CHỐNG TRÀN CỘT (FIX LỖI NHỚ DAI TÊN GIÁO VIÊN)
+              else if (!val1 && val2.toLowerCase() !== 'sáng' && val2.toLowerCase() !== 'chiều') {
                 // Nếu cột trên trống (không tên), và cột dưới CŨNG KHÔNG PHẢI Sáng/Chiều 
                 // -> Đây là một cột rác/trống thực sự, KHÔNG được nhớ tên giáo viên cột trước đó nữa!
                 currentHeader = '';
                 currentHomeroomTeacher = '';
               }
-              // Ngược lại (nếu !val1 nhưng val2 LÀ Sáng/Chiều), hệ thống sẽ vẫn giữ nguyên tên (dành cho ô gộp Sáng/Chiều).
 
               if (currentHeader) {
                 let colBuoi = globalBuoi;

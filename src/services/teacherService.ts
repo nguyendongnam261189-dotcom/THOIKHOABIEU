@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, writeBatch, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Teacher, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
@@ -85,6 +85,18 @@ export const teacherService = {
       await setDoc(docRef, updates, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, COLLECTION_NAME);
+    }
+  },
+
+  // 🔥 HÀM MỚI: DỌN RÁC (Garbage Collection)
+  async deleteTeacher(id: string): Promise<void> {
+    try {
+      const docRef = doc(db, COLLECTION_NAME, id);
+      await deleteDoc(docRef);
+    } catch (error) {
+      // Dùng OperationType.WRITE làm fallback nếu enum của bạn không có chữ DELETE
+      handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+      throw error;
     }
   }
 };

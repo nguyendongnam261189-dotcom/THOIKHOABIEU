@@ -45,7 +45,8 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         const workbook = XLSX.read(data, { type: 'array' });
 
         let uniqueSchedules: Map<string, Schedule> = new Map();
-        let allTeachersMap: Map<string, Teacher> = new Map();
+        // 🔥 ĐỔI KIỂU DỮ LIỆU: Sử dụng Map để đếm số tiết dạy của từng môn
+        let allTeachersMap: Map<string, { name: string; group: string; subjectCounts: Map<string, number> }> = new Map();
 
         // 1. CHỈ ĐỌC TÊN SHEET TKB_GV ĐỂ LẤY TỔ CHUYÊN MÔN
         const teacherDepartmentDict = new Map<string, string>();
@@ -222,18 +223,17 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                         uniqueSchedules.set(key, scheduleObj);
                       }
 
-                      // Ghi nhận Môn dạy cho Giáo viên
-                      if (!allTeachersMap.has(giao_vien)) {
-                        allTeachersMap.set(giao_vien, {
-                          name: giao_vien,
-                          subject: mon,
-                          group: teacherDepartmentDict.get(giao_vien) || 'Chung'
-                        });
-                      } else {
-                        const existingT = allTeachersMap.get(giao_vien)!;
-                        const currentSubjects = existingT.subject ? existingT.subject.split(', ').map(s=>s.trim()) : [];
-                        if (!currentSubjects.includes(mon)) {
-                            existingT.subject = existingT.subject ? `${existingT.subject}, ${mon}` : mon;
+                      // 🔥 TÍNH NĂNG MỚI: ĐẾM SỐ TIẾT DẠY ĐỂ TÌM MÔN CHÍNH
+                      if (giao_vien !== 'Chưa rõ') {
+                        if (!allTeachersMap.has(giao_vien)) {
+                          allTeachersMap.set(giao_vien, {
+                            name: giao_vien,
+                            subjectCounts: new Map<string, number>([[mon, 1]]),
+                            group: teacherDepartmentDict.get(giao_vien) || 'Chung'
+                          });
+                        } else {
+                          const existingT = allTeachersMap.get(giao_vien)!;
+                          existingT.subjectCounts.set(mon, (existingT.subjectCounts.get(mon) || 0) + 1);
                         }
                       }
                     }
@@ -244,7 +244,7 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
         });
 
-        // 4. ĐỒNG BỘ TÊN ĐẦY ĐỦ TỪ PCGD
+        // 4. ĐỒNG BỘ TÊN ĐẦY ĐỦ TỪ PCGD (CHỐNG CƯỚP DANH TÍNH)
         const shortToFullName = new Map<string, string>();
         const pcgdTeachers: { fullName: string, uniqueName: string, firstName: string, classes: Set<string>, pccmStr: string }[] = [];
         if (pcgdSheetName) {
@@ -282,33 +282,35 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             });
 
             allTeachersMap.forEach((teacher, shortName) => {
-                // 🔥 CHỐT CHẶN: TUYỆT ĐỐI KHÔNG ĐỒNG BỘ CHO KẺ MẠO DANH "Chưa rõ"
+                // CHỐT CHẶN: TUYỆT ĐỐI KHÔNG ĐỒNG BỘ CHO KẺ MẠO DANH "Chưa rõ"
                 if (!shortName || shortName === 'Chưa rõ') {
                     shortToFullName.set(shortName, 'Chưa rõ');
                     return;
                 }
 
                 const tkbClasses = tkbTeacherData.get(shortName)?.classes || new Set();
-                let bestMatch = null; let maxScore = -1;
+                let bestMatch = null; 
+                let maxScore = 0; // 🔥 Bắt buộc điểm phải > 0 mới được map
                 
-                // Lấy tên gốc để so sánh (Bỏ các chữ cái phụ phí sau, ví dụ: Tâm H -> TÂM)
                 const baseNameMatch = shortName.match(/^[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴa-zđáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵ]+/);
                 const baseName = baseNameMatch ? baseNameMatch[0].toUpperCase() : shortName.toUpperCase();
 
                 pcgdTeachers.forEach(cand => {
                     let score = 0;
                     const candUpper = cand.fullName.toUpperCase();
+                    const shortUpper = shortName.toUpperCase();
                     
-                    // Điểm cộng theo Tên (Bắt buộc phải có độ trùng khớp tên mới xét tiếp)
-                    if (candUpper === shortName.toUpperCase()) score += 2000;
-                    else if (cand.firstName === baseName) score += 500;
-                    else if (candUpper.includes(shortName.toUpperCase())) score += 100;
-                    else if (candUpper.includes(baseName)) score += 50;
+                    // 🔥 TIÊU CHÍ CHÍNH: TÊN (Trọng số khổng lồ)
+                    if (candUpper === shortUpper) score += 100000;
+                    else if (cand.firstName === baseName) score += 10000;
+                    else if (candUpper.includes(shortUpper)) score += 5000;
+                    else if (candUpper.includes(baseName)) score += 1000;
 
-                    // Điểm cộng theo Lớp giảng dạy
-                    tkbClasses.forEach(c => { if (cand.classes.has(c)) score += 1000; });
+                    // 🔥 TIÊU CHÍ PHỤ: LỚP (Chỉ làm Tie-breaker khi đã có điểm Tên)
+                    if (score > 0) {
+                        tkbClasses.forEach(c => { if (cand.classes.has(c)) score += 10; });
+                    }
                     
-                    // Chỉ map tên nếu Điểm số > 0 (Tránh việc không giống tên tí nào mà vẫn map)
                     if (score > maxScore && score > 0) { 
                         maxScore = score; 
                         bestMatch = cand; 
@@ -324,31 +326,52 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             giao_vien: shortToFullName.get(s.giao_vien) || s.giao_vien,
         }));
 
-        const mergedTeachersMap = new Map<string, Teacher>();
+        const mergedTeachersMap = new Map<string, any>();
         Array.from(allTeachersMap.values()).forEach(t => {
-            // 🔥 CHỐT CHẶN 2: KHÔNG TẠO HỒ SƠ TÀI KHOẢN CHO "CHƯA RÕ" TRONG ADMIN
             if (!t.name || t.name === 'Chưa rõ') return;
 
             const mappedName = shortToFullName.get(t.name) || t.name;
-            
             let finalGroup = t.group;
+            
+            // TÌM MÔN CHÍNH (Môn dạy nhiều tiết nhất)
+            let topSubject = ''; let maxCount = 0;
+            t.subjectCounts.forEach((count: number, mon: string) => {
+                if (count > maxCount) { maxCount = count; topSubject = mon; }
+            });
+
+            // NẾU TỔ LÀ CHUNG, ĐOÁN THEO MÔN CHÍNH
             if (finalGroup === 'Chung') {
-                const inferred = inferDepartmentFromSubject(t.subject);
+                const inferred = inferDepartmentFromSubject(topSubject);
                 if (inferred) finalGroup = inferred;
             }
 
             if (mergedTeachersMap.has(mappedName)) {
+                // Cộng dồn bộ đếm tiết dạy
                 const existing = mergedTeachersMap.get(mappedName)!;
-                const subjects1 = existing.subject ? existing.subject.split(', ').map(s=>s.trim()) : [];
-                const subjects2 = t.subject ? t.subject.split(', ').map(s=>s.trim()) : [];
-                existing.subject = Array.from(new Set([...subjects1, ...subjects2])).filter(Boolean).join(', ');
+                t.subjectCounts.forEach((count: number, mon: string) => {
+                    existing.subjectCounts.set(mon, (existing.subjectCounts.get(mon) || 0) + count);
+                });
                 if (existing.group === 'Chung' && finalGroup !== 'Chung') existing.group = finalGroup;
             } else {
-                mergedTeachersMap.set(mappedName, { ...t, name: mappedName, group: finalGroup });
+                mergedTeachersMap.set(mappedName, { ...t, name: mappedName, group: finalGroup, subjectCounts: new Map(t.subjectCounts) });
             }
         });
 
-        resolve({ schedules: finalSchedules, teachers: Array.from(mergedTeachersMap.values()) });
+        // 🔥 BIẾN HÓA BỘ ĐẾM THÀNH CHUỖI MÔN HỌC (Sắp xếp giảm dần theo số tiết)
+        const finalTeachers: Teacher[] = Array.from(mergedTeachersMap.values()).map(t => {
+            const sortedSubjects = Array.from((t.subjectCounts as Map<string, number>).entries())
+                .sort((a, b) => b[1] - a[1]) // Dạy nhiều nhất xếp lên đầu
+                .map(entry => entry[0]);
+            
+            return {
+                id: '', // Dummy id, Firestore sẽ tự tạo
+                name: t.name,
+                subject: sortedSubjects.join(', '), // VD: "Toán, Tin, HĐTNHN"
+                group: t.group
+            } as Teacher;
+        });
+
+        resolve({ schedules: finalSchedules, teachers: finalTeachers });
       } catch (error) { reject(error); }
     };
     reader.readAsArrayBuffer(file);

@@ -87,7 +87,8 @@ export const ClassView: React.FC = () => {
             {periods.map(period => (
               <tr key={period} className={period === 5 && filterSession === '' ? 'border-b-4 border-gray-300' : ''}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50">
-                  Tiết {period} {period <= 5 ? '(Sáng)' : '(Chiều)'}
+                  {/* 🔥 ĐÃ SỬA LẠI ĐÁNH SỐ TIẾT TỪ 6-10 THÀNH 1-5 CHO BUỔI CHIỀU */}
+                  Tiết {period <= 5 ? period : period - 5} {period <= 5 ? '(Sáng)' : '(Chiều)'}
                 </td>
                 {days.map(day => {
                   const session = period <= 5 ? 'Sáng' : 'Chiều';
@@ -187,7 +188,6 @@ export const ClassView: React.FC = () => {
           <div className="animate-in slide-in-from-right-4 duration-300">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
               
-              {/* 🔥 TIÊU ĐỀ TÍCH HỢP TÊN GVCN */}
               <div>
                 <h3 className="text-xl font-black text-emerald-800 flex items-center">
                   Lớp {String(selectedClass).replace(/\./g, '/')} 

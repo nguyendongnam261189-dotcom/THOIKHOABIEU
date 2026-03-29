@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -24,15 +24,27 @@ export const AdminDashboard: React.FC = () => {
   const [newVersionName, setNewVersionName] = useState('');
 
   // =====================================================================
-  // STATE CHO TÍNH NĂNG MAPPING 3 CỘT
+  // STATE CHO TÍNH NĂNG MAPPING 3 CỘT (KHI UPLOAD)
   // =====================================================================
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [parseData, setParseData] = useState<any>(null);
   const [teacherMapping, setTeacherMapping] = useState<Record<string, string>>({});
   const [departmentMapping, setDepartmentMapping] = useState<Record<string, string>>({});
+  const [filterDepartment, setFilterDepartment] = useState<string>(''); 
+
+  // =====================================================================
+  // 🔥 STATE CHO TÍNH NĂNG QUẢN LÝ TỪ ĐIỂN (DOMINO)
+  // =====================================================================
+  const [showDictionaryModal, setShowDictionaryModal] = useState(false);
+  const [dictionaryAliases, setDictionaryAliases] = useState<Record<string, string>>({});
+  const [editingDictionary, setEditingDictionary] = useState<Record<string, string>>({});
   
-  // 🔥 STATE MỚI: BỘ LỌC TỔ CHUYÊN MÔN
-  const [filterDepartment, setFilterDepartment] = useState<string>(''); // Rỗng = Tất cả
+  // Dùng chính danh sách PCGD hiện tại làm từ điển quy chiếu (Nếu có TKB)
+  const availablePcgdNames = useMemo(() => {
+      // Vì danh sách gốc trong db.teachers chỉ chứa những người "đã từng được map"
+      // nên chúng ta sẽ ưu tiên lấy từ teachers hiện có
+      return Array.from(new Set(teachers.map(t => t.name))).filter(n => n !== 'Chưa rõ').sort();
+  }, [teachers]);
 
   const loadData = async () => {
     try {
@@ -96,6 +108,9 @@ export const AdminDashboard: React.FC = () => {
     } catch (error) { console.error("Lỗi dọn rác GV:", error); }
   };
 
+  // =====================================================================
+  // BƯỚC 1: XỬ LÝ UPLOAD EXCEL VÀ MỞ BẢNG MAPPING
+  // =====================================================================
   const handleProcessExcel = async () => {
     if (!file || !versionName.trim()) {
       setStatus({ type: 'error', message: 'Vui lòng chọn file và nhập tên phiên bản.' });
@@ -124,7 +139,7 @@ export const AdminDashboard: React.FC = () => {
 
       setTeacherMapping(initMapping);
       setDepartmentMapping(initDept);
-      setFilterDepartment(''); // Reset bộ lọc khi mở file mới
+      setFilterDepartment(''); 
       setShowMappingModal(true); 
     } catch (error: any) {
       setStatus({ type: 'error', message: `Lỗi đọc file Excel.` });
@@ -176,14 +191,108 @@ export const AdminDashboard: React.FC = () => {
 
       await scheduleService.saveSchedules(finalSchedules); 
       await teacherService.saveTeachers(finalTeachers);
+      
       const validAliases: Record<string, string> = {};
       Object.entries(teacherMapping).forEach(([short, full]) => { if (short && full && short !== full && full !== 'Chưa rõ') validAliases[short] = full; });
-      if (Object.keys(validAliases).length > 0 && typeof (teacherService as any).saveTeacherAliases === 'function') { await (teacherService as any).saveTeacherAliases(validAliases); }
+      if (Object.keys(validAliases).length > 0 && typeof (teacherService as any).saveTeacherAliases === 'function') { 
+        await (teacherService as any).saveTeacherAliases(validAliases); 
+      }
+      
       await garbageCollectTeachers();
       setStatus({ type: 'success', message: `Đã cập nhật TKB thành công!` });
       setVersionName(''); setFile(null); setShowMappingModal(false); loadData();
     } catch (error) { setStatus({ type: 'error', message: `Lỗi khi lưu dữ liệu TKB.` }); } finally { setLoading(false); }
   };
+
+  // =====================================================================
+  // 🔥 TÍNH NĂNG MỚI: MỞ BẢNG QUẢN LÝ TỪ ĐIỂN
+  // =====================================================================
+  const handleOpenDictionary = async () => {
+    setLoading(true);
+    try {
+        if (typeof (teacherService as any).getTeacherAliases === 'function') {
+            const dbAliases = await (teacherService as any).getTeacherAliases();
+            setDictionaryAliases(dbAliases);
+            setEditingDictionary(dbAliases);
+            setShowDictionaryModal(true);
+        } else {
+            alert("Tính năng chưa được cập nhật trong teacherService.");
+        }
+    } catch (err) {
+        setStatus({ type: 'error', message: 'Lỗi tải Từ điển.' });
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  // 🔥 THUẬT TOÁN BÁO ĐỎ VÒNG HOÁN VỊ (DOMINO)
+  const getDominoConflicts = () => {
+      const conflicts = new Set<string>();
+      const fullNames = Object.values(editingDictionary).filter(Boolean);
+      
+      // Nếu 1 tên FullName xuất hiện 2 lần -> Xung đột!
+      const counts: Record<string, number> = {};
+      fullNames.forEach(name => { counts[name] = (counts[name] || 0) + 1; });
+      
+      Object.entries(editingDictionary).forEach(([short, full]) => {
+          if (!full) conflicts.add(short); // Cảnh báo Đỏ nếu để trống
+          if (full && counts[full] > 1) conflicts.add(short); // Cảnh báo Đỏ nếu trùng người khác
+      });
+      return conflicts;
+  };
+
+  const conflicts = useMemo(() => getDominoConflicts(), [editingDictionary]);
+
+  // 🔥 LƯU TỪ ĐIỂN VÀ CẬP NHẬT TRÚNG ĐÍCH LỊCH DẠY CŨ
+  const handleSaveDictionary = async () => {
+      if (conflicts.size > 0) return; // Khóa an toàn, không cho lưu nếu còn lỗi đỏ
+      setLoading(true);
+      try {
+          const changedAliases: { short: string, oldFull: string, newFull: string }[] = [];
+          
+          Object.entries(editingDictionary).forEach(([shortName, newFullName]) => {
+              const oldFullName = dictionaryAliases[shortName];
+              if (newFullName && newFullName !== oldFullName) {
+                  changedAliases.push({ short: shortName, oldFull: oldFullName || shortName, newFull: newFullName });
+              }
+          });
+
+          if (changedAliases.length > 0) {
+              // 1. Cập nhật lại Từ điển
+              await (teacherService as any).saveTeacherAliases(editingDictionary);
+              
+              // 2. Chạy hàm Cập nhật Trúng đích trong TKB
+              if (typeof (scheduleService as any).updateTeacherInSchedules === 'function') {
+                  for (const change of changedAliases) {
+                      await (scheduleService as any).updateTeacherInSchedules(change.oldFull, change.newFull);
+                  }
+              }
+
+              // 3. Dọn Rác (Xóa hồ sơ cũ nếu bị mồ côi)
+              await garbageCollectTeachers();
+              await loadData();
+          }
+
+          setShowDictionaryModal(false);
+          setStatus({ type: 'success', message: `Đã cập nhật Từ điển và sửa lỗi Lịch dạy cũ thành công!` });
+      } catch (error) {
+          setStatus({ type: 'error', message: `Lỗi khi lưu Từ điển.` });
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleDeleteAlias = async (shortName: string) => {
+    if (!window.confirm(`Xóa bí danh "${shortName}"? Việc này không làm thay đổi lịch dạy hiện tại.`)) return;
+    try {
+        await (teacherService as any).deleteTeacherAlias(shortName);
+        const newDict = { ...editingDictionary };
+        delete newDict[shortName];
+        setEditingDictionary(newDict);
+        setDictionaryAliases(newDict);
+    } catch (e) { alert("Lỗi xóa bí danh"); }
+  };
+
 
   const handleSaveWeeks = async (vName: string, weeks: number) => {
     try { await scheduleService.saveVersionWeeks(vName, weeks); loadData(); } catch (error) { alert("Lỗi lưu số tuần."); }
@@ -248,13 +357,105 @@ export const AdminDashboard: React.FC = () => {
     } catch (err) { alert("Lỗi xuất file."); }
   };
 
-  // =====================================================================
-  // GIAO DIỆN CHÍNH
-  // =====================================================================
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4 relative">
       
-      {/* --- MODAL MAPPING --- */}
+      {/* ================================================================= */}
+      {/* 🔥 MODAL 2: QUẢN LÝ TỪ ĐIỂN VÀ CHỐNG DOMINO */}
+      {/* ================================================================= */}
+      {showDictionaryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-full border border-indigo-100">
+            <div className="p-6 border-b flex justify-between items-center bg-indigo-50 rounded-t-2xl">
+              <div>
+                <h2 className="text-2xl font-bold text-indigo-900 flex items-center"><BookOpen className="mr-3" /> Quản lý Từ điển Tên Giáo viên</h2>
+                <p className="text-indigo-700 text-sm mt-1">
+                  Chỉnh sửa tên viết tắt bị sai. <strong className="text-red-500">Việc lưu thay đổi sẽ sửa thẳng vào TKB cũ.</strong>
+                </p>
+              </div>
+              <button onClick={() => setShowDictionaryModal(false)} className="text-gray-500 hover:text-red-500"><X className="w-6 h-6" /></button>
+            </div>
+
+            <div className="p-6 flex-1 overflow-y-auto bg-gray-50">
+              {Object.keys(editingDictionary).length === 0 ? (
+                  <p className="text-center text-gray-500 py-10 italic">Từ điển đang trống. Hãy tải TKB lên để máy tính tự học!</p>
+              ) : (
+                  <div className="space-y-3">
+                      <div className="grid grid-cols-12 gap-4 font-bold text-gray-500 text-xs px-3 pb-2 uppercase tracking-wider">
+                          <div className="col-span-4">Bí danh (Từ TKB)</div>
+                          <div className="col-span-1 text-center"></div>
+                          <div className="col-span-6">Tên Đầy đủ (Chuẩn PCGD)</div>
+                          <div className="col-span-1 text-center">Xóa</div>
+                      </div>
+
+                      {/* Sắp xếp: Ưu tiên dòng bị LỖI ĐỎ (Domino) lên trên cùng */}
+                      {Object.keys(editingDictionary)
+                          .sort((a, b) => (conflicts.has(b) ? 1 : 0) - (conflicts.has(a) ? 1 : 0))
+                          .map((shortName) => {
+                          const isConflict = conflicts.has(shortName);
+                          // Lọc Options: Chỉ lấy những người đang chưa có chủ (để gợi ý sửa lỗi Domino)
+                          const usedOthers = Object.values(editingDictionary).filter(v => v && v !== editingDictionary[shortName]);
+                          const availableOptions = availablePcgdNames.filter(name => !usedOthers.includes(name));
+
+                          return (
+                              <div key={shortName} className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl border transition-all ${isConflict ? 'bg-red-50 border-red-300 shadow-sm' : 'bg-white border-gray-200 hover:border-indigo-300'}`}>
+                                  <div className="col-span-4 font-bold text-gray-800">
+                                      {shortName}
+                                  </div>
+                                  <div className="col-span-1 text-center">
+                                      <ArrowRight className={`inline w-5 h-5 ${isConflict ? 'text-red-500' : 'text-green-500'}`} />
+                                  </div>
+                                  <div className="col-span-6">
+                                      <select 
+                                        className={`w-full p-2.5 rounded-lg text-sm font-bold outline-none transition-all ${isConflict ? 'border-2 border-red-500 bg-red-100 text-red-900' : 'border border-gray-300 bg-gray-50 text-indigo-900 focus:border-indigo-500 focus:bg-white'}`}
+                                        value={editingDictionary[shortName] || ''}
+                                        onChange={(e) => {
+                                            const newVal = e.target.value;
+                                            setEditingDictionary(prev => ({ ...prev, [shortName]: newVal }));
+                                        }}
+                                      >
+                                          <option value="">-- CHỌN LẠI TÊN (ĐANG BỊ TRÙNG) --</option>
+                                          {/* Hiển thị Option trống + Option chính chủ hiện tại */}
+                                          {availableOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                          {editingDictionary[shortName] && !availableOptions.includes(editingDictionary[shortName]) && (
+                                              <option value={editingDictionary[shortName]}>{editingDictionary[shortName]}</option>
+                                          )}
+                                      </select>
+                                      {isConflict && <p className="text-red-600 text-xs mt-1.5 font-medium flex items-center"><AlertCircle className="w-3 h-3 mr-1"/> Tên này đang bị trùng lặp hoặc để trống!</p>}
+                                  </div>
+                                  <div className="col-span-1 text-center">
+                                      <button onClick={() => handleDeleteAlias(shortName)} className="text-gray-400 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-lg">
+                                          <Trash2 className="w-5 h-5" />
+                                      </button>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+              )}
+            </div>
+
+            <div className="p-5 border-t bg-white rounded-b-2xl flex justify-between items-center shadow-inner">
+              <div className="text-sm font-medium text-gray-500">
+                Tổng: {Object.keys(editingDictionary).length} bí danh đã học.
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDictionaryModal(false)} className="px-6 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 bg-white hover:bg-gray-100">Đóng</button>
+                <button 
+                  onClick={handleSaveDictionary} 
+                  disabled={loading || conflicts.size > 0}
+                  className={`px-6 py-2.5 rounded-lg font-bold text-white shadow flex items-center transition-all ${conflicts.size > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                >
+                  {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />}
+                  {conflicts.size > 0 ? 'Vui lòng sửa lỗi đỏ' : 'Lưu Từ điển & Sửa Lịch cũ'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL MAPPING (HIỆN LÊN KHI ĐỌC XONG EXCEL) --- */}
       {showMappingModal && parseData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
           <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl flex flex-col max-h-full">
@@ -268,23 +469,17 @@ export const AdminDashboard: React.FC = () => {
             
             <div className="p-6 flex-1 overflow-y-auto">
               
-              {/* 🔥 THANH BỘ LỌC TỔ CHUYÊN MÔN (Tabs) */}
               <div className="flex flex-wrap gap-2 mb-6 p-3 bg-gray-50 rounded-xl border border-gray-100">
                 <span className="text-sm font-bold text-gray-500 mr-2 flex items-center"><Filter className="w-4 h-4 mr-1" /> Lọc theo Tổ:</span>
-                
-                {/* Nút "Tất cả" */}
                 <button 
                   onClick={() => setFilterDepartment('')}
                   className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all border ${!filterDepartment ? 'bg-indigo-600 text-white border-indigo-600 shadow' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:text-indigo-700'}`}
                 >
                   Tất cả ({parseData.tkbTeachers.filter((t: any) => t.originalName !== 'Chưa rõ').length})
                 </button>
-                
-                {/* Các nút Tổ */}
                 {DEPARTMENTS.map(dept => {
                   const countInDept = parseData.tkbTeachers.filter((t: any) => t.originalName !== 'Chưa rõ' && departmentMapping[t.originalName] === dept).length;
-                  if (countInDept === 0) return null; // Không hiện tổ không có giáo viên nào trong TKB này
-
+                  if (countInDept === 0) return null;
                   return (
                     <button 
                       key={dept}
@@ -297,7 +492,6 @@ export const AdminDashboard: React.FC = () => {
                 })}
               </div>
 
-              {/* HEADERS */}
               <div className="grid grid-cols-12 gap-4 font-bold text-gray-600 bg-gray-100 p-3 rounded-t-lg text-sm border-b-2 border-gray-300">
                 <div className="col-span-3">TÊN VIẾT TẮT (TRONG TKB)</div>
                 <div className="col-span-1 text-center"></div>
@@ -305,15 +499,12 @@ export const AdminDashboard: React.FC = () => {
                 <div className="col-span-4">GÁN VÀO TỔ CHUYÊN MÔN</div>
               </div>
               
-              {/* 🔥 DANH SÁCH GIÁO VIÊN ĐÃ ĐƯỢC LỌC VÀ SẮP XẾP */}
               {parseData.tkbTeachers
                 .filter((t: any) => t.originalName !== 'Chưa rõ')
-                // 1. Áp dụng bộ lọc Tổ
                 .filter((t: any) => {
                   if (!filterDepartment) return true;
                   return departmentMapping[t.originalName] === filterDepartment;
                 })
-                // 2. Sắp xếp: Ưu tiên người chưa khớp nổi lên đầu
                 .sort((a: any, b: any) => (teacherMapping[a.originalName] ? 1 : 0) - (teacherMapping[b.originalName] ? 1 : 0))
                 .map((tkb: any, idx: number) => {
                   const isMapped = !!teacherMapping[tkb.originalName];
@@ -352,7 +543,6 @@ export const AdminDashboard: React.FC = () => {
                   );
               })}
 
-              {/* Khi bộ lọc không có kết quả */}
               {filterDepartment && parseData.tkbTeachers.filter((t: any) => t.originalName !== 'Chưa rõ' && departmentMapping[t.originalName] === filterDepartment).length === 0 && (
                 <div className="text-center py-10 text-gray-400 italic bg-gray-50 rounded-b-lg border border-gray-100">
                   Không có giáo viên nào thuộc tổ "{filterDepartment}" trong TKB này.
@@ -380,7 +570,18 @@ export const AdminDashboard: React.FC = () => {
 
       {/* 1. UPLOAD */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
+          
+          {/* 🔥 NÚT MỞ BẢNG QUẢN LÝ TỪ ĐIỂN */}
+          <button 
+            onClick={handleOpenDictionary}
+            className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-bold transition-colors"
+          >
+            <BookOpen className="w-4 h-4 mr-2" /> Quản lý Từ điển Tên
+          </button>
+        </div>
+
         {status && (
           <div className={`p-4 mb-6 rounded-xl text-sm font-medium border ${status.type === 'success' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
             {status.type === 'success' ? <CheckCircle className="inline mr-2 w-5 h-5" /> : <AlertCircle className="inline mr-2 w-5 h-5" />}

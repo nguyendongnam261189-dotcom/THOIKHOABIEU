@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { LayoutDashboard, Users, Presentation, BarChart3, Loader2, Search, Radar, Clock, AlertCircle, Layers, Contact } from 'lucide-react';
+import { LayoutDashboard, Users, Presentation, BarChart3, Loader2, Search, Radar, Clock, Layers, Contact, Star } from 'lucide-react';
 
 export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttcm' | null, department?: string | null }> = ({ role, department }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
@@ -15,7 +15,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
 
-  // 🔥 ĐÃ VÁ LỖI "LỜI NGUYỀN CHỦ NHẬT": Thứ Chủ Nhật (0) sẽ tự động gán là Thứ 2.
+  // Vá lỗi "Lời nguyền Chủ Nhật": Thứ Chủ Nhật (0) sẽ tự động gán là Thứ 2.
   const getInitialDay = () => {
     const today = new Date().getDay();
     return today === 0 ? 2 : today + 1;
@@ -25,8 +25,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   const [radarSession, setRadarSession] = useState<'Sáng' | 'Chiều'>('Sáng');
   const [radarPeriod, setRadarPeriod] = useState<number>(1);
   const [radarDept, setRadarDept] = useState<string>(''); 
-
-  const isOrphanTTCM = role === 'ttcm' && (!department || department === 'undefined' || String(department) === 'null');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -45,11 +43,8 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           setSelectedVersion(uniqueVersions[0]);
         }
 
-        let allowedTeachers = allTeachers;
-        if (role === 'ttcm' && !isOrphanTTCM) {
-          allowedTeachers = allTeachers.filter(t => t.group === department);
-        }
-        setTeachers(allowedTeachers);
+        // 🔥 TẤT CẢ VAI TRÒ ĐỀU THẤY TOÀN BỘ GIÁO VIÊN
+        setTeachers(allTeachers);
 
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
@@ -58,23 +53,19 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       }
     };
     fetchData();
-  }, [role, department, isOrphanTTCM]);
+  }, []);
 
+  // 🔥 TẤT CẢ VAI TRÒ ĐỀU THẤY TOÀN BỘ LỊCH DẠY
   const schedules = useMemo(() => {
-    let filtered = allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
-    if (role === 'ttcm' && !isOrphanTTCM) {
-      const allowedNames = new Set(teachers.map(t => t.name));
-      filtered = filtered.filter(s => allowedNames.has(s.giao_vien));
-    }
-    return filtered;
-  }, [allSchedules, selectedVersion, role, department, teachers, isOrphanTTCM]);
+    return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
+  }, [allSchedules, selectedVersion]);
 
   const dynamicDepartments = useMemo(() => {
     return Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort();
   }, [teachers]);
 
   const baseStats = useMemo(() => {
-    if (loading || (role === 'ttcm' && teachers.length === 0)) return null;
+    if (loading) return null;
 
     const uniqueClasses = new Set(schedules.map(s => s.lop));
 
@@ -96,7 +87,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       totalPeriods: schedules.length,
       teacherLoads
     };
-  }, [loading, schedules, teachers, role]);
+  }, [loading, schedules, teachers]);
 
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
@@ -138,7 +129,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
 
   // ======================================================================
-  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG (ĐÃ ĐƯỢC ÉP KIỂU VÀ CHỐNG KHOẢNG TRẮNG)
+  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG
   // ======================================================================
   const freeTeachers = useMemo(() => {
     if (!baseStats) return [];
@@ -146,7 +137,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     const busyTeacherNames = new Set(
       schedules
         .filter(s => {
-          // Ép kiểu cực mạnh để không bị lỗi so sánh
           const isSameDay = Number(s.thu) === Number(radarDay);
           const isSameSession = String(s.buoi).trim().toLowerCase() === String(radarSession).trim().toLowerCase();
           const isSamePeriod = Number(s.tiet) === Number(radarPeriod);
@@ -161,6 +151,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       .sort((a, b) => a.load - b.load);
   }, [schedules, baseStats, radarDay, radarSession, radarPeriod, radarDept]);
 
+  // 🔥 THUẬT TOÁN GHIM TỔ CỦA USER LÊN ĐẦU (PIN TO TOP)
   const groupedFreeTeachers = useMemo(() => {
     const groups: Record<string, typeof freeTeachers> = {};
     freeTeachers.forEach(t => {
@@ -169,23 +160,22 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       groups[groupName].push(t);
     });
     
-    return Object.keys(groups).sort().map(groupName => ({
+    return Object.keys(groups).sort((a, b) => {
+      // 1. Nếu user có tổ, đưa tổ đó lên trên cùng
+      if (department) {
+        if (a === department) return -1;
+        if (b === department) return 1;
+      }
+      // 2. Các tổ còn lại sắp xếp theo ABC
+      return a.localeCompare(b, 'vi');
+    }).map(groupName => ({
       group: groupName,
-      teachers: groups[groupName]
+      teachers: groups[groupName],
+      isMyDept: groupName === department // Cờ đánh dấu để tô màu UI
     }));
-  }, [freeTeachers]);
+  }, [freeTeachers, department]);
 
   if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 text-indigo-600 animate-spin" /></div>;
-
-  if (isOrphanTTCM) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 bg-yellow-50 rounded-xl border border-dashed border-yellow-300">
-         <AlertCircle className="w-16 h-16 text-yellow-500 mb-4" />
-         <h3 className="text-xl font-bold text-yellow-800 mb-2">Chưa phân công Tổ chuyên môn</h3>
-         <p className="text-yellow-700 text-center max-w-md">Vui lòng báo Admin cập nhật thông tin Tổ chuyên môn cho tài khoản của bạn để xem thống kê.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -194,9 +184,9 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           <div>
             <h2 className="text-2xl font-bold text-gray-800 flex items-center mb-1">
               <LayoutDashboard className="mr-2.5 text-indigo-600 h-7 w-7" /> 
-              {role === 'ttcm' ? `Thống kê Tổ: ${department}` : 'Trạm Chỉ Huy & Thống Kê'}
+              Trạm Chỉ Huy & Thống Kê Toàn Trường
             </h2>
-            <p className="text-sm text-gray-500 mt-1">Hỗ trợ {role === 'ttcm' ? 'quản lý định mức tổ' : 'điều phối nhân sự'} dựa trên TKB thực tế.</p>
+            <p className="text-sm text-gray-500 mt-1">Góc nhìn tổng thể giúp điều phối nhân sự và nắm bắt tình hình thực tế.</p>
           </div>
 
           <div className="flex items-center bg-indigo-50 p-2 rounded-xl border border-indigo-100 shadow-sm self-start lg:self-center">
@@ -231,6 +221,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
+        {/* DANH BẠ GIÁO VIÊN CHỦ NHIỆM */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col h-[600px]">
           <div className="flex items-center mb-5 border-b pb-3 border-gray-100">
             <Contact className="w-5 h-5 mr-2 text-indigo-500"/><h3 className="text-lg font-bold text-gray-900">Danh bạ Giáo viên Chủ nhiệm</h3>
@@ -240,12 +231,11 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <input type="text" placeholder="Gõ tên lớp (VD: 6/11) hoặc Tên GV..." className="pl-9 pr-3 py-2 w-full border border-gray-300 rounded-lg text-sm" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
-            {(role === 'admin' || role === 'manager') && (
-              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
-                <option value="">Toàn trường</option>
-                {dynamicDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
-              </select>
-            )}
+            {/* 🔥 ĐÃ MỞ KHÓA CHO MỌI ROLE CÓ THỂ LỌC THEO TỔ */}
+            <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
+              <option value="">Toàn trường</option>
+              {dynamicDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+            </select>
           </div>
           
           <div className="bg-indigo-50 px-4 py-2 rounded-t-lg border border-indigo-100 flex items-center text-xs font-bold text-indigo-700 uppercase">
@@ -272,6 +262,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           </div>
         </div>
 
+        {/* RADAR TÌM GIÁO VIÊN TRỐNG */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-emerald-200 flex flex-col h-[600px]">
           <div className="flex items-center mb-5 border-b pb-3 border-emerald-100">
             <Radar className="w-5 h-5 mr-2 text-emerald-500"/><h3 className="text-lg font-bold text-gray-900">Radar Tìm giáo viên trống</h3>
@@ -287,12 +278,12 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
             <select className="px-2 py-2 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-900 bg-emerald-50" value={radarPeriod} onChange={(e) => setRadarPeriod(Number(e.target.value))}>
               {[1,2,3,4,5].map(p => <option key={p} value={p}>Tiết {p}</option>)}
             </select>
-            {(role === 'admin' || role === 'manager') && (
-              <select className="px-2 py-2 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-900 bg-emerald-50" value={radarDept} onChange={(e) => setRadarDept(e.target.value)}>
-                <option value="">Tất cả tổ</option>
-                {dynamicDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
-              </select>
-            )}
+            
+            {/* 🔥 ĐÃ MỞ KHÓA CHO MỌI ROLE CÓ THỂ LỌC THEO TỔ */}
+            <select className="px-2 py-2 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-900 bg-emerald-50" value={radarDept} onChange={(e) => setRadarDept(e.target.value)}>
+              <option value="">Tất cả tổ</option>
+              {dynamicDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+            </select>
           </div>
 
           <div className="bg-emerald-600 px-4 py-2 rounded-t-lg flex text-xs font-bold text-white uppercase shadow-sm">
@@ -303,16 +294,22 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           <div className="flex-1 overflow-y-auto border-x border-b border-emerald-200 rounded-b-lg bg-gray-50/50">
             {groupedFreeTeachers.length > 0 ? groupedFreeTeachers.map(group => (
               <div key={group.group} className="mb-3 last:mb-0">
-                <div className="bg-emerald-100/80 px-4 py-2 text-xs font-bold text-emerald-900 border-y border-emerald-200 sticky top-0 backdrop-blur-sm z-10 flex justify-between">
-                  <span>{group.group}</span>
-                  <span className="bg-emerald-200 text-emerald-800 px-2 rounded-full">{group.teachers.length}</span>
+                {/* 🔥 HIGHLIGHT TỔ NHÀ NẾU TRÙNG KHỚP */}
+                <div className={`px-4 py-2 text-xs font-bold border-y sticky top-0 backdrop-blur-sm z-10 flex justify-between ${group.isMyDept ? 'bg-amber-100/90 text-amber-900 border-amber-200 shadow-sm' : 'bg-emerald-100/80 text-emerald-900 border-emerald-200'}`}>
+                  <span className="flex items-center">
+                    {group.isMyDept && <Star className="w-3.5 h-3.5 mr-1 text-amber-500 fill-amber-500" />}
+                    {group.group} {group.isMyDept && '(Tổ của bạn)'}
+                  </span>
+                  <span className={`${group.isMyDept ? 'bg-amber-200 text-amber-800' : 'bg-emerald-200 text-emerald-800'} px-2 rounded-full`}>
+                    {group.teachers.length}
+                  </span>
                 </div>
                 
                 <div className="divide-y divide-emerald-50 border-b border-emerald-100">
                   {group.teachers.map(t => (
-                    <div key={t.name} className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-emerald-50 transition-colors">
+                    <div key={t.name} className={`flex items-center justify-between px-4 py-2.5 transition-colors ${group.isMyDept ? 'bg-amber-50/30 hover:bg-amber-50' : 'bg-white hover:bg-emerald-50'}`}>
                       <div className="font-bold text-gray-800 text-sm pl-2">{t.name}</div>
-                      <div className="flex items-center text-emerald-700 font-bold bg-emerald-100 px-2.5 py-1 rounded text-sm shadow-sm">
+                      <div className={`flex items-center font-bold px-2.5 py-1 rounded text-sm shadow-sm ${group.isMyDept ? 'text-amber-800 bg-amber-100' : 'text-emerald-700 bg-emerald-100'}`}>
                         <Clock className="w-3.5 h-3.5 mr-1" />{t.load}
                       </div>
                     </div>

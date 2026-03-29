@@ -9,7 +9,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // States cho Danh bạ GVCN (Tìm kiếm chung cho cả Lớp và Tên)
+  // States cho Danh bạ GVCN
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDept, setFilterDept] = useState('');
 
@@ -95,9 +95,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     };
   }, [loading, schedules, teachers, role]);
 
-  // ======================================================================
-  // 🔥 THUẬT TOÁN DÒ TÌM GIÁO VIÊN CHỦ NHIỆM TỰ ĐỘNG
-  // ======================================================================
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
@@ -124,7 +121,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       };
     });
 
-    // Sắp xếp Lớp theo thứ tự tự nhiên (6/1 -> 6/2 -> 7/1)
     return result.sort((a, b) => a.className.localeCompare(b.className, 'vi', { numeric: true }));
   }, [schedules, teachers]);
 
@@ -139,7 +135,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
 
   // ======================================================================
-  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG THỜI GIAN THỰC
+  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG & GOM NHÓM THEO TỔ CHUYÊN MÔN
   // ======================================================================
   const freeTeachers = useMemo(() => {
     if (!baseStats) return [];
@@ -153,8 +149,23 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     return baseStats.teacherLoads
       .filter(t => !busyTeacherNames.has(t.name))
       .filter(t => radarDept ? t.group === radarDept : true)
-      .sort((a, b) => a.load - b.load);
+      .sort((a, b) => a.load - b.load); // Sắp xếp theo số tiết (ưu tiên người rảnh nhất)
   }, [schedules, baseStats, radarDay, radarSession, radarPeriod, radarDept]);
+
+  // Thuật toán nhóm Giáo viên theo Tổ
+  const groupedFreeTeachers = useMemo(() => {
+    const groups: Record<string, typeof freeTeachers> = {};
+    freeTeachers.forEach(t => {
+      if (!groups[t.group]) groups[t.group] = [];
+      groups[t.group].push(t);
+    });
+    
+    // Sắp xếp tên tổ theo bảng chữ cái
+    return Object.keys(groups).sort().map(groupName => ({
+      group: groupName,
+      teachers: groups[groupName]
+    }));
+  }, [freeTeachers]);
 
   if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 text-indigo-600 animate-spin" /></div>;
 
@@ -195,7 +206,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
         </div>
       </div>
 
-      {/* 🔥 CẮT BỎ SỐ PHÒNG, GRID CÒN 3 CỘT ĐỂ THẺ TO ĐẸP HƠN */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100 flex items-center space-x-4">
           <div className="bg-indigo-100 p-3 rounded-full text-indigo-600"><Users className="w-6 h-6" /></div>
@@ -214,7 +224,7 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* ================================================================= */}
-        {/* 🔥 GIAO DIỆN DANH BẠ GIÁO VIÊN CHỦ NHIỆM */}
+        {/* GIAO DIỆN DANH BẠ GIÁO VIÊN CHỦ NHIỆM */}
         {/* ================================================================= */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col h-[600px]">
           <div className="flex items-center mb-5 border-b pb-3 border-gray-100">
@@ -258,12 +268,13 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
         </div>
 
         {/* ================================================================= */}
-        {/* 🔥 GIAO DIỆN RADAR TÌM GIÁO VIÊN TRỐNG */}
+        {/* 🔥 GIAO DIỆN RADAR ĐÃ ĐƯỢC NHÓM THEO TỔ CHUYÊN MÔN */}
         {/* ================================================================= */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-emerald-200 flex flex-col h-[600px]">
           <div className="flex items-center mb-5 border-b pb-3 border-emerald-100">
             <Radar className="w-5 h-5 mr-2 text-emerald-500"/><h3 className="text-lg font-bold text-gray-900">Radar Tìm giáo viên trống</h3>
           </div>
+          
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
             <select className="px-2 py-2 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-900 bg-emerald-50" value={radarDay} onChange={(e) => setRadarDay(Number(e.target.value))}>
               {[2,3,4,5,6,7].map(d => <option key={d} value={d}>Thứ {d}</option>)}
@@ -281,15 +292,37 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
               </select>
             )}
           </div>
-          <div className="bg-emerald-600 px-4 py-2 rounded-t-lg flex text-xs font-bold text-white uppercase"><div className="flex-1">GV Khả dụng ({freeTeachers.length})</div><div className="w-16 text-right">Tổng tiết</div></div>
-          <div className="flex-1 overflow-y-auto border-x border-b border-emerald-200 rounded-b-lg divide-y divide-emerald-50">
-            {freeTeachers.length > 0 ? freeTeachers.map((t) => (
-              <div key={t.name} className="flex items-center justify-between px-4 py-3 hover:bg-emerald-50">
-                <div><div className="font-bold text-gray-800 text-sm">{t.name}</div><div className="text-[10px] text-gray-500">{t.group}</div></div>
-                <div className="flex items-center text-emerald-700 font-bold bg-emerald-100 px-2 py-1 rounded text-sm"><Clock className="w-3 h-3 mr-1" />{t.load}</div>
+
+          <div className="bg-emerald-600 px-4 py-2 rounded-t-lg flex text-xs font-bold text-white uppercase shadow-sm">
+            <div className="flex-1">GV Khả dụng ({freeTeachers.length})</div>
+            <div className="w-16 text-right">Tổng tiết</div>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto border-x border-b border-emerald-200 rounded-b-lg bg-gray-50/50">
+            {groupedFreeTeachers.length > 0 ? groupedFreeTeachers.map(group => (
+              <div key={group.group} className="mb-3 last:mb-0">
+                {/* Header Tên Tổ */}
+                <div className="bg-emerald-100/80 px-4 py-2 text-xs font-bold text-emerald-900 border-y border-emerald-200 sticky top-0 backdrop-blur-sm z-10 flex justify-between">
+                  <span>{group.group}</span>
+                  <span className="bg-emerald-200 text-emerald-800 px-2 rounded-full">{group.teachers.length}</span>
+                </div>
+                
+                {/* Danh sách Giáo viên trong Tổ */}
+                <div className="divide-y divide-emerald-50 border-b border-emerald-100">
+                  {group.teachers.map(t => (
+                    <div key={t.name} className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-emerald-50 transition-colors">
+                      <div className="font-bold text-gray-800 text-sm pl-2">{t.name}</div>
+                      <div className="flex items-center text-emerald-700 font-bold bg-emerald-100 px-2.5 py-1 rounded text-sm shadow-sm">
+                        <Clock className="w-3.5 h-3.5 mr-1" />{t.load}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )) : (
-              <div className="text-center py-8 text-emerald-600 italic text-sm">Tất cả giáo viên đều bận tiết này.</div>
+              <div className="text-center py-10 text-emerald-600 italic text-sm">
+                Tất cả giáo viên đều bận vào tiết này.
+              </div>
             )}
           </div>
         </div>

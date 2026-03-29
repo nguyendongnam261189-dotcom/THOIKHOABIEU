@@ -2,9 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, Plus, BarChart3 } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, Save, BarChart3, Users, ArrowRight } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
+
+const DEPARTMENTS = ['Toán - Tin', 'Văn - GDCD', 'Sử - Địa', 'KHTN và Công nghệ', 'Ngoại ngữ', 'Nghệ thuật - Thể chất', 'Chung'];
 
 export const AdminDashboard: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -20,6 +22,14 @@ export const AdminDashboard: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editingVersion, setEditingVersion] = useState<string | null>(null);
   const [newVersionName, setNewVersionName] = useState('');
+
+  // =====================================================================
+  // STATE CHO TÍNH NĂNG MAPPING 3 CỘT
+  // =====================================================================
+  const [showMappingModal, setShowMappingModal] = useState(false);
+  const [parseData, setParseData] = useState<any>(null);
+  const [teacherMapping, setTeacherMapping] = useState<Record<string, string>>({});
+  const [departmentMapping, setDepartmentMapping] = useState<Record<string, string>>({});
 
   const loadData = async () => {
     try {
@@ -66,123 +76,204 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  /**
-   * 🔥 THUẬT TOÁN DỌN RÁC (GARBAGE COLLECTION)
-   * Kích hoạt tự động để xóa những giáo viên không còn tồn tại trong bất kỳ TKB nào
-   */
   const garbageCollectTeachers = async () => {
     try {
-      // 1. Lấy tất cả lịch dạy của TẤT CẢ phiên bản hiện có
       const currentSchedules = await scheduleService.getAllSchedules();
       const activeNames = new Set(currentSchedules.map(s => s.giao_vien));
-      
-      // 2. Lấy toàn bộ danh bạ Giáo viên
       const currentTeachers = await teacherService.getAllTeachers();
-
-      // 3. Quét và xóa các "Bóng ma"
       const deletePromises: Promise<void>[] = [];
       for (const t of currentTeachers) {
         if (!activeNames.has(t.name) && t.id) {
-          // Ép kiểu any để tránh lỗi TypeScript nếu chưa khai báo hàm trong interface
           if (typeof (teacherService as any).deleteTeacher === 'function') {
             deletePromises.push((teacherService as any).deleteTeacher(t.id));
-          } else {
-            console.warn("Hệ thống cần hàm deleteTeacher trong teacherService để dọn rác.");
           }
         }
       }
-      
-      if (deletePromises.length > 0) {
-        await Promise.all(deletePromises);
-        console.log(`Đã tự động dọn dẹp ${deletePromises.length} hồ sơ giáo viên rác.`);
-      }
-    } catch (error) {
-      console.error("Lỗi dọn rác GV:", error);
-    }
+      if (deletePromises.length > 0) await Promise.all(deletePromises);
+    } catch (error) { console.error("Lỗi dọn rác GV:", error); }
   };
 
-  const handleUpload = async () => {
+  // =====================================================================
+  // BƯỚC 1: XỬ LÝ FILE EXCEL VÀ MỞ BẢNG MAPPING
+  // =====================================================================
+  const handleProcessExcel = async () => {
     if (!file || !versionName.trim()) {
-      setStatus({ type: 'error', message: 'Vui lòng chọn file.' });
+      setStatus({ type: 'error', message: 'Vui lòng chọn file và nhập tên phiên bản.' });
       return;
     }
     setLoading(true);
     try {
-      const { schedules, teachers } = await parseExcelFile(file);
-      const labeledSchedules = schedules.map(s => ({ ...s, versionName: versionName.trim() }));
+      // 1. Máy bóc tách thô
+      const data = await parseExcelFile(file);
+      setParseData(data);
+
+      // 2. Kéo "Bộ nhớ Từ điển" từ Firebase về
+      let dbAliases: Record<string, string> = {};
+      if (typeof (teacherService as any).getTeacherAliases === 'function') {
+        dbAliases = await (teacherService as any).getTeacherAliases();
+      }
+
+      // 3. Chuẩn bị state cho UI
+      const initMapping: Record<string, string> = {};
+      const initDept: Record<string, string> = {};
+
+      data.tkbTeachers.forEach((t: any) => {
+        if (t.originalName === 'Chưa rõ') return;
+        
+        // Ưu tiên 1: Lịch sử đã lưu (Máy nhớ)
+        if (dbAliases[t.originalName]) {
+            initMapping[t.originalName] = dbAliases[t.originalName];
+        } 
+        // Ưu tiên 2: Máy tính dự đoán hôm nay
+        else if (data.suggestedMapping[t.originalName]) {
+            initMapping[t.originalName] = data.suggestedMapping[t.originalName];
+        } 
+        // Ưu tiên 3: Bó tay, để trống cho Admin
+        else {
+            initMapping[t.originalName] = '';
+        }
+
+        initDept[t.originalName] = t.inferredGroup || 'Chung';
+      });
+
+      setTeacherMapping(initMapping);
+      setDepartmentMapping(initDept);
+      setShowMappingModal(true); // Bật Bảng Mapping lên!
+    } catch (error: any) {
+      setStatus({ type: 'error', message: `Lỗi đọc file Excel.` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // =====================================================================
+  // BƯỚC 2: THUẬT TOÁN "ÉP DUYÊN" (QUY TẮC LOẠI TRỪ)
+  // =====================================================================
+  useEffect(() => {
+    if (!showMappingModal || !parseData) return;
+
+    const tkbNames = parseData.tkbTeachers.map((t: any) => t.originalName).filter((n: string) => n !== 'Chưa rõ');
+    const pcgdNames = parseData.pcgdTeachers.map((p: any) => p.uniqueName);
+    
+    // Tìm những người chưa có chủ
+    const unmappedTkb = tkbNames.filter((name: string) => !teacherMapping[name]);
+    const usedPcgd = Object.values(teacherMapping).filter(Boolean);
+    const unusedPcgd = pcgdNames.filter((p: string) => !usedPcgd.includes(p));
+
+    // Nếu chỉ còn đúng 1 cặp ế, tự ghép luôn!
+    if (unmappedTkb.length === 1 && unusedPcgd.length === 1) {
+        setTeacherMapping(prev => ({ ...prev, [unmappedTkb[0]]: unusedPcgd[0] }));
+    }
+  }, [teacherMapping, showMappingModal, parseData]);
+
+
+  // =====================================================================
+  // BƯỚC 3: LƯU TKB CHÍNH THỨC VÀ HỌC TỪ ĐIỂN
+  // =====================================================================
+  const handleConfirmMapping = async () => {
+    setLoading(true);
+    try {
+      // 1. Áp dụng Mapping vào Lịch dạy
+      const finalSchedules = parseData.rawSchedules.map((s: any) => ({
+          ...s,
+          giao_vien: teacherMapping[s.giao_vien] || s.giao_vien, // Đổi tên viết tắt thành tên thật
+          versionName: versionName.trim()
+      }));
+
+      // 2. Gộp lại danh sách Giáo viên chuẩn (105 người)
+      const mergedTeachersMap = new Map<string, any>();
+
+      // Đưa toàn bộ 105 người từ PCGD vào trước (Lưới an toàn)
+      parseData.pcgdTeachers.forEach((pcgd: any) => {
+          const tkbOriginalName = Object.keys(teacherMapping).find(k => teacherMapping[k] === pcgd.uniqueName);
+          const uiGroup = tkbOriginalName ? departmentMapping[tkbOriginalName] : 'Chung';
+
+          mergedTeachersMap.set(pcgd.uniqueName, {
+              name: pcgd.uniqueName,
+              group: uiGroup && uiGroup !== 'Chung' ? uiGroup : 'Chung',
+              subjectCounts: new Map<string, number>()
+          });
+      });
+
+      // Bơm số tiết từ TKB vào
+      parseData.tkbTeachers.forEach((tkb: any) => {
+          const finalName = teacherMapping[tkb.originalName] || tkb.originalName;
+          if (finalName === 'Chưa rõ') return;
+
+          if (!mergedTeachersMap.has(finalName)) {
+              mergedTeachersMap.set(finalName, {
+                  name: finalName,
+                  group: departmentMapping[tkb.originalName] || 'Chung',
+                  subjectCounts: new Map()
+              });
+          }
+          const tData = mergedTeachersMap.get(finalName)!;
+          tkb.subjectCounts.forEach((count: number, mon: string) => {
+              tData.subjectCounts.set(mon, (tData.subjectCounts.get(mon) || 0) + count);
+          });
+      });
+
+      const finalTeachers: Teacher[] = Array.from(mergedTeachersMap.values()).map(t => {
+          const sortedSubjects = Array.from((t.subjectCounts as Map<string, number>).entries())
+              .sort((a, b) => b[1] - a[1]).map(entry => entry[0]);
+          return { id: '', name: t.name, subject: sortedSubjects.join(', '), group: t.group } as Teacher;
+      });
+
+      // 3. Đẩy lên Firebase
+      await scheduleService.saveSchedules(finalSchedules); 
+      await teacherService.saveTeachers(finalTeachers);
       
-      // 1. Lưu TKB mới
-      await scheduleService.saveSchedules(labeledSchedules); 
-      // 2. Lưu/Cập nhật Giáo viên mới (Upsert)
-      await teacherService.saveTeachers(teachers);
-      // 3. Quét dọn các giáo viên bị mất việc (nếu file Excel mới làm họ biến mất)
+      // 4. Máy tự học: Lưu những tên Admin đã map vào Từ điển để dùng cho lần sau
+      const validAliases: Record<string, string> = {};
+      Object.entries(teacherMapping).forEach(([short, full]) => {
+          if (short && full && short !== full && full !== 'Chưa rõ') validAliases[short] = full;
+      });
+      if (Object.keys(validAliases).length > 0 && typeof (teacherService as any).saveTeacherAliases === 'function') {
+          await (teacherService as any).saveTeacherAliases(validAliases);
+      }
+
       await garbageCollectTeachers();
 
-      setStatus({ type: 'success', message: `Đã cập nhật thành công!` });
+      setStatus({ type: 'success', message: `Đã cập nhật TKB và Bộ nhớ Từ điển thành công!` });
       setVersionName('');
       setFile(null);
+      setShowMappingModal(false);
       loadData();
-    } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi xử lý dữ liệu.` });
+    } catch (error) {
+      setStatus({ type: 'error', message: `Lỗi khi lưu dữ liệu TKB.` });
     } finally {
       setLoading(false);
     }
   };
 
   const handleSaveWeeks = async (vName: string, weeks: number) => {
-    try {
-      await scheduleService.saveVersionWeeks(vName, weeks);
-      loadData();
-    } catch (error) {
-      alert("Lỗi lưu số tuần.");
-    }
+    try { await scheduleService.saveVersionWeeks(vName, weeks); loadData(); } catch (error) { alert("Lỗi lưu số tuần."); }
   };
 
   const handleRenameVersion = async (oldName: string, newName: string) => {
     setLoading(true);
-    try {
-      await scheduleService.renameVersion(oldName, newName.trim());
-      setEditingVersion(null);
-      loadData();
-    } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi đổi tên.` });
-    } finally {
-      setLoading(false);
-    }
+    try { await scheduleService.renameVersion(oldName, newName.trim()); setEditingVersion(null); loadData(); } finally { setLoading(false); }
   };
 
   const handleDeleteVersion = async (vName: string) => {
     if (!window.confirm(`Xóa "${vName}"?`)) return;
     setLoading(true);
     try {
-      // 1. Xóa TKB của phiên bản này
       await scheduleService.deleteScheduleByVersion(vName);
-      // 2. Tự động dọn rác (Xóa luôn những GV chỉ dạy ở duy nhất phiên bản vừa xóa)
       await garbageCollectTeachers();
-      
       loadData();
-    } catch (error: any) {
-      setStatus({ type: 'error', message: `Lỗi xóa dữ liệu.` });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleDeleteAll = async () => {
     setLoading(true);
     try {
-      // 1. Xóa sạch 100% Lịch dạy
       await scheduleService.deleteAllSchedules();
-      
-      // 2. Xóa sạch 100% Giáo viên
       const allT = await teacherService.getAllTeachers();
       if (typeof (teacherService as any).deleteTeacher === 'function') {
         await Promise.all(allT.map(t => (teacherService as any).deleteTeacher(t.id)));
       }
-      
       await loadData();
-    } catch (error) {
-      setStatus({ type: 'error', message: 'Lỗi xóa dữ liệu' });
     } finally {
       setLoading(false);
       setShowDeleteConfirm(false);
@@ -191,9 +282,7 @@ export const AdminDashboard: React.FC = () => {
 
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
-    return s.includes('HDTN') || s.includes('HĐTN') || 
-           s.includes('CHÀO CỜ') || s.includes('CC-') || 
-           s.includes('SHL') || s.includes('SINH HOẠT');
+    return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
   const exportIntegratedReport = () => {
@@ -216,22 +305,11 @@ export const AdminDashboard: React.FC = () => {
 
           versions.forEach(v => {
             if (v.weeks <= 0) return;
-            
-            const vPeriods = allSchedules.filter(s => 
-              s.versionName === v.name && 
-              s.giao_vien === teacher.name && 
-              s.lop.split(', ').some(l => ktLopSet.has(l.trim()))
-            );
-
+            const vPeriods = allSchedules.filter(s => s.versionName === v.name && s.giao_vien === teacher.name && s.lop.split(', ').some(l => ktLopSet.has(l.trim())));
             if (vPeriods.length === 0) return;
 
             const classesAsCN = new Set<string>();
-            vPeriods.forEach(p => {
-              if (isHDTNType(p.mon)) {
-                p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => classesAsCN.add(ml));
-              }
-            });
-
+            vPeriods.forEach(p => { if (isHDTNType(p.mon)) p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => classesAsCN.add(ml)); });
             const normalPeriods = vPeriods.filter(p => !isHDTNType(p.mon));
             
             const classCountMap: Record<string, number> = {};
@@ -241,34 +319,24 @@ export const AdminDashboard: React.FC = () => {
               p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => {
                 const cleanLop = ml.replace(/\./g, '/');
                 classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1;
-                classesTaughtSet.add(cleanLop);
-                subTotalVersion += 1;
+                classesTaughtSet.add(cleanLop); subTotalVersion += 1;
               });
             });
 
             classesAsCN.forEach(ml => {
               const cleanLop = ml.replace(/\./g, '/');
               const key = `HĐTN (CN) lớp ${cleanLop}`;
-              classCountMap[key] = 3;
-              classesTaughtSet.add(cleanLop);
-              subTotalVersion += 3;
+              classCountMap[key] = 3; classesTaughtSet.add(cleanLop); subTotalVersion += 3;
             });
 
             if (subTotalVersion > 0) {
               teacherTotalKT += (subTotalVersion * v.weeks);
-              const detailStr = Object.entries(classCountMap).map(([l, c]) => `${c}t ${l}`).join(' + ');
-              detailsArr.push(`[${detailStr}] x ${v.weeks} tuần`);
+              detailsArr.push(`[${Object.entries(classCountMap).map(([l, c]) => `${c}t ${l}`).join(' + ')}] x ${v.weeks} tuần`);
             }
           });
 
           if (teacherTotalKT > 0) {
-            rows.push({
-              'STT': rows.length + 1,
-              'Họ và tên': teacher.name,
-              'Lớp dạy': Array.from(classesTaughtSet).join(', '),
-              'Số tiết': teacherTotalKT,
-              'Công thức tính': detailsArr.join(' + ') + ` = ${teacherTotalKT} tiết`
-            });
+            rows.push({ 'STT': rows.length + 1, 'Họ và tên': teacher.name, 'Lớp dạy': Array.from(classesTaughtSet).join(', '), 'Số tiết': teacherTotalKT, 'Công thức tính': detailsArr.join(' + ') + ` = ${teacherTotalKT} tiết` });
             deptTotal += teacherTotalKT;
           }
         });
@@ -297,8 +365,104 @@ export const AdminDashboard: React.FC = () => {
     } catch (err) { alert("Lỗi xuất file."); }
   };
 
+  // =====================================================================
+  // GIAO DIỆN CHÍNH
+  // =====================================================================
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
+    <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4 relative">
+      
+      {/* --- MODAL MAPPING (HIỆN LÊN KHI ĐỌC XONG EXCEL) --- */}
+      {showMappingModal && parseData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
+          <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl flex flex-col max-h-full">
+            <div className="p-6 border-b flex justify-between items-center bg-indigo-50 rounded-t-2xl">
+              <div>
+                <h2 className="text-2xl font-bold text-indigo-900 flex items-center"><Users className="mr-3" /> Đối soát Danh sách Giáo viên</h2>
+                <p className="text-indigo-700 text-sm mt-1">Khớp nối Tên viết tắt (Từ TKB) sang Tên đầy đủ (Từ Danh bạ trường). Máy sẽ tự học cho các lần sau.</p>
+              </div>
+              <button onClick={() => setShowMappingModal(false)} className="text-gray-500 hover:text-red-500"><X className="w-6 h-6" /></button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto">
+              <div className="grid grid-cols-12 gap-4 font-bold text-gray-600 bg-gray-100 p-3 rounded-t-lg text-sm border-b-2 border-gray-300">
+                <div className="col-span-3">TÊN VIẾT TẮT (TRONG TKB)</div>
+                <div className="col-span-1 text-center"></div>
+                <div className="col-span-4">CHỌN TÊN ĐẦY ĐỦ (CHUẨN)</div>
+                <div className="col-span-4">TỔ CHUYÊN MÔN</div>
+              </div>
+              
+              {/* Sắp xếp: Những người chưa khớp (màu đỏ) nổi lên trên để dễ tìm */}
+              {parseData.tkbTeachers
+                .filter((t: any) => t.originalName !== 'Chưa rõ')
+                .sort((a: any, b: any) => (teacherMapping[a.originalName] ? 1 : 0) - (teacherMapping[b.originalName] ? 1 : 0))
+                .map((tkb: any, idx: number) => {
+                  const isMapped = !!teacherMapping[tkb.originalName];
+                  
+                  // Tạo danh sách Option lọc thông minh (Chỉ hiện người chưa có chủ + Chính chủ hiện tại)
+                  const usedOthers = Object.values(teacherMapping).filter(v => v && v !== teacherMapping[tkb.originalName]);
+                  const availableOptions = parseData.pcgdTeachers.filter((p: any) => !usedOthers.includes(p.uniqueName));
+
+                  return (
+                    <div key={idx} className={`grid grid-cols-12 gap-4 items-center p-3 border-b border-gray-100 transition-colors ${isMapped ? 'hover:bg-green-50' : 'bg-red-50'}`}>
+                      {/* CỘT 1: TÊN VIẾT TẮT */}
+                      <div className="col-span-3 font-medium text-gray-800">
+                        {tkb.originalName}
+                        <div className="text-xs text-gray-400 mt-0.5">{Array.from(tkb.subjectCounts.keys()).join(', ')}</div>
+                      </div>
+                      
+                      <div className="col-span-1 text-center">
+                        <ArrowRight className={`inline w-5 h-5 ${isMapped ? 'text-green-500' : 'text-red-400'}`} />
+                      </div>
+                      
+                      {/* CỘT 2: CHỌN TÊN ĐẦY ĐỦ */}
+                      <div className="col-span-4">
+                        <select 
+                          className={`w-full p-2 border rounded-lg text-sm font-medium outline-none ${isMapped ? 'border-green-300 bg-green-50 text-green-800 focus:border-green-500' : 'border-red-300 bg-white text-red-700 focus:border-red-500 ring-2 ring-red-100'}`}
+                          value={teacherMapping[tkb.originalName] || ''}
+                          onChange={(e) => setTeacherMapping(prev => ({ ...prev, [tkb.originalName]: e.target.value }))}
+                        >
+                          <option value="">-- Cần xác định thủ công --</option>
+                          {availableOptions.map((p: any) => (
+                            <option key={p.uniqueName} value={p.uniqueName}>{p.uniqueName}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* CỘT 3: TỔ CHUYÊN MÔN */}
+                      <div className="col-span-4">
+                        <select 
+                          className="w-full p-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white outline-none focus:border-indigo-500"
+                          value={departmentMapping[tkb.originalName] || 'Chung'}
+                          onChange={(e) => setDepartmentMapping(prev => ({ ...prev, [tkb.originalName]: e.target.value }))}
+                        >
+                          {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  );
+              })}
+            </div>
+
+            <div className="p-4 border-t bg-gray-50 rounded-b-2xl flex justify-between items-center">
+              <div className="text-sm font-bold text-gray-600">
+                Đã khớp: <span className="text-green-600 text-lg">{Object.values(teacherMapping).filter(Boolean).length}</span> / {parseData.tkbTeachers.filter((t:any)=>t.originalName!=='Chưa rõ').length} giáo viên
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowMappingModal(false)} className="px-6 py-2.5 rounded-lg border border-gray-300 font-bold text-gray-600 bg-white hover:bg-gray-100">Hủy bỏ</button>
+                <button 
+                  onClick={handleConfirmMapping} 
+                  disabled={loading}
+                  className="px-6 py-2.5 rounded-lg font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow flex items-center disabled:bg-gray-400"
+                >
+                  {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <CheckCircle className="w-5 h-5 mr-2" />}
+                  Lưu TKB & Ghi nhớ Từ điển
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 1. UPLOAD */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
@@ -323,9 +487,11 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
         <div className="flex justify-between items-center">
-          <button onClick={handleUpload} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md disabled:bg-gray-400">
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Tải lên'}
+          {/* 🔥 NÚT TẢI LÊN MỚI ĐÃ ĐƯỢC CHUYỂN HƯỚNG SANG MỞ MODAL */}
+          <button onClick={handleProcessExcel} disabled={!file || !versionName || loading} className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-bold shadow-md disabled:bg-gray-400">
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Tải lên & Khớp Dữ liệu'}
           </button>
+
           {!showDeleteConfirm ? (
             <button onClick={() => setShowDeleteConfirm(true)} className="text-red-600 text-sm font-bold underline">Xóa sạch dữ liệu</button>
           ) : (

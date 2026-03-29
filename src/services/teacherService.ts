@@ -101,7 +101,7 @@ export const teacherService = {
   },
 
   // ============================================================================
-  // TÍNH NĂNG MỚI: BỘ NHỚ TỪ ĐIỂN MAPPING (Alias Dictionary)
+  // BỘ NHỚ TỪ ĐIỂN MAPPING (Alias Dictionary)
   // ============================================================================
 
   // Đọc từ điển để hỗ trợ việc phân tích tự động
@@ -129,7 +129,6 @@ export const teacherService = {
       Object.entries(mapping).forEach(([shortName, fullName]) => {
         if (!shortName || !fullName) return;
         
-        // Dùng generateTeacherId làm ID cho an toàn, tránh lỗi ký tự đặc biệt của Firebase
         const safeId = generateTeacherId(shortName);
         const docRef = doc(db, ALIAS_COLLECTION, safeId);
         
@@ -138,6 +137,18 @@ export const teacherService = {
       await batch.commit();
     } catch (error) {
       console.error("Lỗi lưu từ điển GV:", error);
+      throw error;
+    }
+  },
+
+  // 🔥 HÀM MỚI: XÓA MỘT BÍ DANH (Dùng để tháo nút thắt khi bị trùng)
+  async deleteTeacherAlias(shortName: string): Promise<void> {
+    try {
+      const safeId = generateTeacherId(shortName);
+      const docRef = doc(db, ALIAS_COLLECTION, safeId);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.error("Lỗi xóa từ điển GV:", error);
       throw error;
     }
   }

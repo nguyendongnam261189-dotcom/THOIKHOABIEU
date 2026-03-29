@@ -1,6 +1,13 @@
 import * as XLSX from 'xlsx';
 import { Schedule, Teacher } from '../types';
 
+// 🔥 HÀM KHỬ DẤU: Giải quyết triệt để ca "BinhV2" vs "Bình"
+const removeAccents = (str: string): string => {
+  return str.normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd').replace(/Đ/g, 'D');
+};
+
 const getDepartmentFromSheetName = (sheetName: string): string => {
   const name = sheetName.toUpperCase();
   if (name.includes('_NN')) return 'Ngoại ngữ';
@@ -45,9 +52,11 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
         const workbook = XLSX.read(data, { type: 'array' });
 
         let uniqueSchedules: Map<string, Schedule> = new Map();
-        let allTeachersMap: Map<string, { name: string; group: string; subjectCounts: Map<string, number> }> = new Map();
+        let mergedTeachersMap = new Map<string, { name: string; group: string; subjectCounts: Map<string, number> }>();
 
-        // 1. CHỈ ĐỌC TÊN SHEET TKB_GV ĐỂ LẤY TỔ CHUYÊN MÔN
+        // ============================================================================
+        // BƯỚC 1: ĐỌC SHEET TKB_GV LẤY GỢI Ý TỔ CHUYÊN MÔN
+        // ============================================================================
         const teacherDepartmentDict = new Map<string, string>();
         workbook.SheetNames.forEach(sheetName => {
             if (sheetName.includes('TKB_GV') && !sheetName.includes('PCGD')) {
@@ -72,45 +81,79 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
             }
         });
 
-        // 2. TÌM MÔN HỌC TỪ PCGD & TẠO TỪ ĐIỂN MÔN CHUẨN
+        // ============================================================================
+        // BƯỚC 2: ĐỌC DANH BẠ PCGD TRƯỚC ĐỂ LÀM BỘ TỪ ĐIỂN QUY CHIẾU (CHỐNG CƯỚP TIẾT)
+        // ============================================================================
         const knownSubjects = new Set<string>();
+        const pcgdTeachers: { fullName: string, uniqueName: string, firstName: string, classes: Set<string>, pccmStr: string, parsedSubjects: Set<string> }[] = [];
+        
         const pcgdSheetName = workbook.SheetNames.find(name => name.toUpperCase().includes('PCGD') || name.toUpperCase().includes('PHÂN CÔNG'));
         if (pcgdSheetName) {
           const worksheet = workbook.Sheets[pcgdSheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
-          let pccmColIdx = -1; let headerRowIdx = -1;
-          for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+          let pccmColIdx = -1; let fullNameColIdx = -1; let headerRowIdx = -1;
+          
+          for (let i = 0; i < Math.min(15, jsonData.length); i++) {
             const row = jsonData[i] || [];
             for (let c = 0; c < row.length; c++) {
               const cellStr = cleanString(row[c]).toLowerCase();
-              if (cellStr.includes('phân công chuyên môn') || cellStr.includes('chuyên môn') || cellStr.includes('môn dạy')) {
-                pccmColIdx = c; headerRowIdx = i; break;
-              }
+              if (cellStr === 'họ và tên' || cellStr === 'họ tên' || cellStr === 'giáo viên' || cellStr === 'tên gv') fullNameColIdx = c;
+              if (cellStr.includes('phân công chuyên môn') || cellStr.includes('chuyên môn') || cellStr.includes('môn dạy')) pccmColIdx = c;
             }
-            if (pccmColIdx !== -1) break;
+            if (fullNameColIdx !== -1) { headerRowIdx = i; break; }
           }
-          if (pccmColIdx !== -1) {
+
+          if (fullNameColIdx !== -1 && pccmColIdx !== -1) {
             for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
               const row = jsonData[i] || [];
-              const cellData = cleanString(row[pccmColIdx]);
-              if (cellData) {
-                const lines = cellData.split('\n');
-                lines.forEach(line => {
-                  const parts = line.split('+').map(s => s.trim());
-                  parts.forEach(part => {
-                    const subject = part.replace(/\s*\(.*?\)\s*/g, '').trim();
-                    if (subject) knownSubjects.add(subject);
-                  });
+              const fullName = cleanString(row[fullNameColIdx]);
+              if (!fullName || fullName.length < 4 || !fullName.includes(' ')) continue;
+              
+              const pccmStr = cleanString(row[pccmColIdx]);
+              const classMatches = pccmStr.match(/\d{1,2}\s*[./]\s*\d{1,2}/g) || [];
+              const pcgdClasses = new Set(classMatches.map(c => formatClassName(c))); 
+              
+              const parsedSubjects = new Set<string>();
+              const lines = pccmStr.split('\n');
+              lines.forEach(line => {
+                const parts = line.split('+').map(s => s.trim());
+                parts.forEach(part => {
+                  const subject = part.replace(/\s*\(.*?\)\s*/g, '').trim();
+                  if (subject) {
+                      knownSubjects.add(subject);
+                      parsedSubjects.add(subject.toUpperCase());
+                  }
                 });
-              }
+              });
+
+              pcgdTeachers.push({ 
+                  fullName, 
+                  uniqueName: fullName, 
+                  firstName: fullName.split(' ').pop()?.toUpperCase() || '', 
+                  classes: pcgdClasses, 
+                  pccmStr: pccmStr.toUpperCase(),
+                  parsedSubjects
+              });
             }
           }
         }
         
+        // Thêm cứng các môn dễ bị cắt sai
         ['Toán', 'Văn', 'Anh', 'AVăn', 'Lý', 'Hóa', 'Sinh', 'Sử', 'Địa', 'GDCD', 'Tin', 'CNghệ', 'Công nghệ', 'GDTC', 'Thể dục', 'Nghệ thuật - N', 'Nghệ thuật - MT', 'Nghệ thuật', 'Âm nhạc', 'Mỹ thuật', 'KHTN1', 'KHTN2', 'KHTN3', 'KHTN', 'Lịch sử', 'Địa lý', 'CC-HĐTNHN', 'HĐTNHN', 'HĐTN-HN', 'HĐTN', 'NDGDĐP 6', 'NDGDĐP 7', 'NDGDĐP 8', 'NDGDĐP 9', 'NDGDĐP', 'SHL', 'Chào cờ'].forEach(s => knownSubjects.add(s));
         const sortedKnownSubjects = Array.from(knownSubjects).sort((a, b) => b.length - a.length);
 
-        // 3. ĐỌC THỜI KHÓA BIỂU TỪ SHEET TKB_LOP
+        // Đánh dấu người trùng tên (VD: Nguyễn Thị Vân (TOÁN))
+        pcgdTeachers.forEach(t => {
+            const count = pcgdTeachers.filter(x => x.fullName === t.fullName).length;
+            if (count > 1) {
+                const subjMatch = t.pccmStr.match(/^[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴ]+/i);
+                t.uniqueName = `${t.fullName} (${subjMatch ? subjMatch[0].trim().toUpperCase() : 'GV'})`;
+            }
+        });
+
+        // ============================================================================
+        // BƯỚC 3: ĐỌC TKB_LOP VÀ "PHÂN XỬ" TÊN GIÁO VIÊN NGAY TRÊN TỪNG Ô
+        // ============================================================================
         workbook.SheetNames.forEach(sheetName => {
           if (!sheetName.toUpperCase().includes('TKB_LOP')) return;
 
@@ -177,37 +220,88 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                     const cellData = cleanString(row[c]);
                     if (cellData) {
                       let mon = ''; 
-                      let giao_vien = ''; 
+                      let giao_vien_raw = ''; 
                       const cleanCellData = cellData.replace(/\r/g, '').trim();
                       
                       let matchedSubject = sortedKnownSubjects.find(s => cleanCellData.toUpperCase().startsWith(s.toUpperCase()));
                       
                       if (matchedSubject) {
                         mon = matchedSubject;
-                        giao_vien = cleanCellData.substring(matchedSubject.length).replace(/^[- \t]+/, '').trim();
+                        giao_vien_raw = cleanCellData.substring(matchedSubject.length).replace(/^[- \t]+/, '').trim();
                       } else {
                         const lastDashIdx = cleanCellData.lastIndexOf('-');
                         if (lastDashIdx !== -1) {
                             mon = cleanCellData.substring(0, lastDashIdx).trim();
-                            giao_vien = cleanCellData.substring(lastDashIdx + 1).trim();
+                            giao_vien_raw = cleanCellData.substring(lastDashIdx + 1).trim();
                         } else {
                             mon = cleanCellData;
-                            giao_vien = ''; 
+                            giao_vien_raw = ''; 
                         }
                       }
 
-                      if (!giao_vien) giao_vien = 'Chưa rõ';
+                      // 🔥 THUẬT TOÁN PHÂN XỬ TÊN NGAY TẠI TRẬN (Chống cướp tiết & Khử dấu)
+                      let resolvedName = 'Chưa rõ';
+                      if (giao_vien_raw && giao_vien_raw.toLowerCase() !== 'chưa rõ') {
+                          let bestMatch = null; 
+                          let maxScore = 0; 
+                          
+                          const shortUpper = giao_vien_raw.toUpperCase().replace(/\s+/g, '');
+                          const shortNoAccent = removeAccents(shortUpper);
+                          const monUpper = mon.toUpperCase();
+
+                          pcgdTeachers.forEach(cand => {
+                              let nameScore = 0;
+                              const candUpper = cand.fullName.toUpperCase().replace(/\s+/g, ''); 
+                              const candNoAccent = removeAccents(candUpper);
+                              const firstName = cand.firstName.toUpperCase();
+                              const firstNoAccent = removeAccents(firstName);
+                              
+                              // 1. Chấm điểm Tên
+                              if (candUpper === shortUpper) nameScore += 100000;
+                              else if (candNoAccent === shortNoAccent) nameScore += 80000;
+                              else if (candUpper.includes(shortUpper)) nameScore += 10000;
+                              else if (candNoAccent.includes(shortNoAccent)) nameScore += 5000;
+                              else if (shortUpper.includes(firstName)) nameScore += 2000;
+                              else if (shortNoAccent.includes(firstNoAccent)) nameScore += 1000;
+
+                              // 2. Chấm điểm Context (Chỉ khi Tên có độ trùng khớp)
+                              if (nameScore > 0) {
+                                  let contextScore = 0;
+                                  
+                                  // Chấm Môn: Phân biệt Hoài Thi (Toán) và Minh Thi (Văn)
+                                  if (monUpper) {
+                                      cand.parsedSubjects.forEach(s => {
+                                          if (monUpper.includes(s) || s.includes(monUpper)) {
+                                              contextScore += 2000;
+                                          }
+                                      });
+                                  }
+                                  
+                                  // Chấm Lớp: Phân biệt nếu trùng cả tên lẫn môn (cực hiếm)
+                                  if (cand.classes.has(colMap[c].className)) contextScore += 500;
+                                  
+                                  const totalScore = nameScore + contextScore;
+                                  if (totalScore > maxScore) { 
+                                      maxScore = totalScore; 
+                                      bestMatch = cand; 
+                                  }
+                              }
+                          });
+                          
+                          resolvedName = bestMatch ? bestMatch.uniqueName : giao_vien_raw;
+                      }
 
                       const scheduleObj: Schedule = {
                         thu: currentThu,
                         tiet: currentTiet > 5 ? currentTiet - 5 : currentTiet,
                         lop: colMap[c].className, 
                         mon: mon,
-                        giao_vien: giao_vien,
+                        giao_vien: resolvedName,
                         phong: '',
                         buoi: currentTiet > 5 ? 'Chiều' : colMap[c].buoi
                       };
 
+                      // Gộp tiết (Nếu dạy 2 lớp cùng lúc)
                       const key = `${scheduleObj.thu}-${scheduleObj.buoi}-${scheduleObj.tiet}-${scheduleObj.giao_vien}-${scheduleObj.mon}`;
                       if (uniqueSchedules.has(key)) {
                         const existing = uniqueSchedules.get(key)!;
@@ -219,18 +313,17 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
                         uniqueSchedules.set(key, scheduleObj);
                       }
 
-                      // ĐẾM SỐ TIẾT DẠY ĐỂ TÌM MÔN CHÍNH
-                      if (giao_vien !== 'Chưa rõ') {
-                        if (!allTeachersMap.has(giao_vien)) {
-                          allTeachersMap.set(giao_vien, {
-                            name: giao_vien,
-                            subjectCounts: new Map<string, number>([[mon, 1]]),
-                            group: teacherDepartmentDict.get(giao_vien) || 'Chung'
-                          });
-                        } else {
-                          const existingT = allTeachersMap.get(giao_vien)!;
-                          existingT.subjectCounts.set(mon, (existingT.subjectCounts.get(mon) || 0) + 1);
+                      // Cập nhật Database Tạm (Đếm Môn)
+                      if (resolvedName !== 'Chưa rõ') {
+                        if (!mergedTeachersMap.has(resolvedName)) {
+                            mergedTeachersMap.set(resolvedName, {
+                                name: resolvedName,
+                                group: teacherDepartmentDict.get(resolvedName) || 'Chung',
+                                subjectCounts: new Map<string, number>()
+                            });
                         }
+                        const teacherData = mergedTeachersMap.get(resolvedName)!;
+                        teacherData.subjectCounts.set(mon, (teacherData.subjectCounts.get(mon) || 0) + 1);
                       }
                     }
                   }
@@ -240,135 +333,45 @@ export const parseExcelFile = async (file: File): Promise<{ schedules: Schedule[
           }
         });
 
-        // 4. ĐỒNG BỘ TÊN ĐẦY ĐỦ TỪ PCGD
-        const shortToFullName = new Map<string, string>();
-        const pcgdTeachers: { fullName: string, uniqueName: string, firstName: string, classes: Set<string>, pccmStr: string }[] = [];
-        if (pcgdSheetName) {
-            const worksheet = workbook.Sheets[pcgdSheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
-            let fullNameColIdx = -1; let pccmColIdx = -1; let headerRowIdx = -1;
-            for (let i = 0; i < Math.min(15, jsonData.length); i++) {
-                const row = jsonData[i] || [];
-                for (let c = 0; c < row.length; c++) {
-                    const cellStr = cleanString(row[c]).toLowerCase();
-                    if (cellStr === 'họ và tên' || cellStr === 'họ tên' || cellStr === 'giáo viên' || cellStr === 'tên gv') fullNameColIdx = c;
-                    if (cellStr.includes('phân công chuyên môn') || cellStr.includes('chuyên môn') || cellStr.includes('môn dạy')) pccmColIdx = c;
-                }
-                if (fullNameColIdx !== -1) { headerRowIdx = i; break; }
-            }
-            if (fullNameColIdx !== -1) {
-                for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
-                    const row = jsonData[i] || [];
-                    const fullName = cleanString(row[fullNameColIdx]);
-                    if (!fullName || fullName.length < 4 || !fullName.includes(' ')) continue;
-                    const pccmStr = pccmColIdx !== -1 ? cleanString(row[pccmColIdx]) : '';
-                    const classMatches = pccmStr.match(/\d{1,2}\s*[./]\s*\d{1,2}/g) || [];
-                    const pcgdClasses = new Set(classMatches.map(c => formatClassName(c))); 
-                    pcgdTeachers.push({ fullName, uniqueName: fullName, firstName: fullName.split(' ').pop()?.toUpperCase() || '', classes: pcgdClasses, pccmStr: pccmStr.toUpperCase() });
-                }
-            }
+        // ============================================================================
+        // BƯỚC 4: KẾT XUẤT VÀ VỚT GIÁO VIÊN
+        // ============================================================================
+        const finalSchedules = Array.from(uniqueSchedules.values());
 
-            // 🔥 PHỤC HỒI TÍNH NĂNG TỐT BẢN CŨ: GẮN ĐUÔI (MÔN) CHO GIÁO VIÊN TRÙNG TÊN
-            pcgdTeachers.forEach(t => {
-                const count = pcgdTeachers.filter(x => x.fullName === t.fullName).length;
-                if (count > 1) {
-                    const subjMatch = t.pccmStr.match(/^[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴ]+/i);
-                    t.uniqueName = `${t.fullName} (${subjMatch ? subjMatch[0].trim().toUpperCase() : 'GV'})`;
+        // 🔥 TÍNH NĂNG MỚI: QUÉT LẠI PCGD ĐỂ VỚT CÁC GIÁO VIÊN CÓ TRONG DANH BẠ NHƯNG CHƯA ĐƯỢC XẾP LỊCH
+        pcgdTeachers.forEach(cand => {
+            if (!mergedTeachersMap.has(cand.uniqueName)) {
+                let inferredGroup = 'Chung';
+                const mainSubjMatch = cand.pccmStr.match(/^[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴ]+/i);
+                if (mainSubjMatch) {
+                    inferredGroup = inferDepartmentFromSubject(mainSubjMatch[0].trim()) || 'Chung';
                 }
-            });
-
-            const tkbTeacherData = new Map<string, { classes: Set<string> }>();
-            uniqueSchedules.forEach(s => {
-                if (!tkbTeacherData.has(s.giao_vien)) tkbTeacherData.set(s.giao_vien, { classes: new Set() });
-                s.lop.split(',').forEach(c => {
-                    const cleanC = formatClassName(c); 
-                    if (cleanC && cleanC !== 'CHƯAXẾP') tkbTeacherData.get(s.giao_vien)!.classes.add(cleanC);
+                mergedTeachersMap.set(cand.uniqueName, {
+                    name: cand.uniqueName,
+                    group: inferredGroup,
+                    subjectCounts: new Map() // Đảm bảo số tiết = 0
                 });
-            });
-
-            allTeachersMap.forEach((teacher, shortName) => {
-                if (!shortName || shortName === 'Chưa rõ') {
-                    shortToFullName.set(shortName, 'Chưa rõ');
-                    return;
-                }
-
-                const tkbClasses = tkbTeacherData.get(shortName)?.classes || new Set();
-                let bestMatch = null; 
-                let maxScore = 0; 
-                
-                // Chuẩn hóa tên viết tắt (VD: "Yến T" -> "YẾNT")
-                const shortUpper = shortName.toUpperCase().replace(/\s+/g, '');
-
-                pcgdTeachers.forEach(cand => {
-                    let nameScore = 0;
-                    const candUpper = cand.fullName.toUpperCase().replace(/\s+/g, ''); // "NGUYỄNTHỊYẾN"
-                    const firstName = cand.firstName.toUpperCase(); // "YẾN"
-                    
-                    // 🔥 THUẬT TOÁN DÒ TÊN THÔNG MINH HƠN:
-                    if (candUpper === shortUpper) nameScore += 100000;
-                    else if (candUpper.includes(shortUpper)) nameScore += 5000; // "NGUYỄNTHỊANHTHƯ" chứa "THƯ"
-                    else if (shortUpper.includes(firstName)) nameScore += 5000; // "YẾNT" chứa "YẾN", "TÂMH" chứa "TÂM"
-
-                    // Chỉ khi nào Tên có độ khớp (> 0) mới xét đến Lớp để bẻ khóa trùng tên
-                    if (nameScore > 0) {
-                        let classScore = 0;
-                        tkbClasses.forEach(c => { if (cand.classes.has(c)) classScore += 100; });
-                        
-                        const totalScore = nameScore + classScore;
-                        if (totalScore > maxScore) { 
-                            maxScore = totalScore; 
-                            bestMatch = cand; 
-                        }
-                    }
-                });
-                shortToFullName.set(shortName, bestMatch ? (bestMatch as any).uniqueName : shortName);
-            });
-        }
-        
-        // 5. KẾT XUẤT DỮ LIỆU
-        const finalSchedules = Array.from(uniqueSchedules.values()).map(s => ({
-            ...s,
-            giao_vien: shortToFullName.get(s.giao_vien) || s.giao_vien,
-        }));
-
-        const mergedTeachersMap = new Map<string, any>();
-        Array.from(allTeachersMap.values()).forEach(t => {
-            if (!t.name || t.name === 'Chưa rõ') return;
-
-            const mappedName = shortToFullName.get(t.name) || t.name;
-            let finalGroup = t.group;
-            
-            let topSubject = ''; let maxCount = 0;
-            t.subjectCounts.forEach((count: number, mon: string) => {
-                if (count > maxCount) { maxCount = count; topSubject = mon; }
-            });
-
-            if (finalGroup === 'Chung') {
-                const inferred = inferDepartmentFromSubject(topSubject);
-                if (inferred) finalGroup = inferred;
-            }
-
-            if (mergedTeachersMap.has(mappedName)) {
-                const existing = mergedTeachersMap.get(mappedName)!;
-                t.subjectCounts.forEach((count: number, mon: string) => {
-                    existing.subjectCounts.set(mon, (existing.subjectCounts.get(mon) || 0) + count);
-                });
-                if (existing.group === 'Chung' && finalGroup !== 'Chung') existing.group = finalGroup;
-            } else {
-                mergedTeachersMap.set(mappedName, { ...t, name: mappedName, group: finalGroup, subjectCounts: new Map(t.subjectCounts) });
             }
         });
 
         const finalTeachers: Teacher[] = Array.from(mergedTeachersMap.values()).map(t => {
+            let finalGroup = t.group;
+            
+            // Tìm môn chính để sắp xếp và nội suy Tổ (nếu đang là Chung)
             const sortedSubjects = Array.from((t.subjectCounts as Map<string, number>).entries())
                 .sort((a, b) => b[1] - a[1])
                 .map(entry => entry[0]);
             
+            if (finalGroup === 'Chung' && sortedSubjects.length > 0) {
+                const inferred = inferDepartmentFromSubject(sortedSubjects[0]);
+                if (inferred) finalGroup = inferred;
+            }
+
             return {
                 id: '', 
                 name: t.name,
                 subject: sortedSubjects.join(', '), 
-                group: t.group
+                group: finalGroup
             } as Teacher;
         });
 

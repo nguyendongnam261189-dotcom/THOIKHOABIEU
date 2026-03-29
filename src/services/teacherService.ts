@@ -4,12 +4,13 @@ import { Teacher, OperationType } from '../types';
 import { handleFirestoreError } from './firebaseUtils';
 
 const COLLECTION_NAME = 'teachers';
+const ALIAS_COLLECTION = 'teacher_aliases';
 
 /**
  * 🔥 HÀM TẠO ID CỐ ĐỊNH TỪ TÊN ĐÃ PHÂN TÍCH
  * Giúp gộp "Hải" và "Nguyễn Ngọc Hải" hoặc phân biệt 2 cô Vân.
  */
-const generateTeacherId = (name: string): string => {
+export const generateTeacherId = (name: string): string => {
   if (!name) return 'unknown';
   return name
     .toLowerCase()
@@ -88,14 +89,55 @@ export const teacherService = {
     }
   },
 
-  // 🔥 HÀM MỚI: DỌN RÁC (Garbage Collection)
+  // DỌN RÁC (Garbage Collection)
   async deleteTeacher(id: string): Promise<void> {
     try {
       const docRef = doc(db, COLLECTION_NAME, id);
       await deleteDoc(docRef);
     } catch (error) {
-      // Dùng OperationType.WRITE làm fallback nếu enum của bạn không có chữ DELETE
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  // ============================================================================
+  // TÍNH NĂNG MỚI: BỘ NHỚ TỪ ĐIỂN MAPPING (Alias Dictionary)
+  // ============================================================================
+
+  // Đọc từ điển để hỗ trợ việc phân tích tự động
+  async getTeacherAliases(): Promise<Record<string, string>> {
+    try {
+      const snapshot = await getDocs(collection(db, ALIAS_COLLECTION));
+      const aliases: Record<string, string> = {};
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.shortName && data.fullName) {
+          aliases[data.shortName] = data.fullName;
+        }
+      });
+      return aliases;
+    } catch (error) {
+      console.error("Lỗi tải từ điển GV:", error);
+      return {};
+    }
+  },
+
+  // Lưu từ điển mới sau khi Admin đã Mapping thủ công
+  async saveTeacherAliases(mapping: Record<string, string>): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      Object.entries(mapping).forEach(([shortName, fullName]) => {
+        if (!shortName || !fullName) return;
+        
+        // Dùng generateTeacherId làm ID cho an toàn, tránh lỗi ký tự đặc biệt của Firebase
+        const safeId = generateTeacherId(shortName);
+        const docRef = doc(db, ALIAS_COLLECTION, safeId);
+        
+        batch.set(docRef, { shortName, fullName }, { merge: true });
+      });
+      await batch.commit();
+    } catch (error) {
+      console.error("Lỗi lưu từ điển GV:", error);
       throw error;
     }
   }

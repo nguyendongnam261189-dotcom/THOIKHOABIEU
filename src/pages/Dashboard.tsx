@@ -9,16 +9,19 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // States cho Danh bạ GVCN
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDept, setFilterDept] = useState('');
 
-  // STATES CHO ĐA PHIÊN BẢN
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
 
-  // States cho Trạm Radar tìm giáo viên trống
-  const [radarDay, setRadarDay] = useState<number>(new Date().getDay() + 1 > 7 ? 2 : new Date().getDay() + 1);
+  // 🔥 ĐÃ VÁ LỖI "LỜI NGUYỀN CHỦ NHẬT": Thứ Chủ Nhật (0) sẽ tự động gán là Thứ 2.
+  const getInitialDay = () => {
+    const today = new Date().getDay();
+    return today === 0 ? 2 : today + 1;
+  };
+
+  const [radarDay, setRadarDay] = useState<number>(getInitialDay());
   const [radarSession, setRadarSession] = useState<'Sáng' | 'Chiều'>('Sáng');
   const [radarPeriod, setRadarPeriod] = useState<number>(1);
   const [radarDept, setRadarDept] = useState<string>(''); 
@@ -135,32 +138,37 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
 
   // ======================================================================
-  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG & GOM NHÓM THEO TỔ CHUYÊN MÔN
+  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG (ĐÃ ĐƯỢC ÉP KIỂU VÀ CHỐNG KHOẢNG TRẮNG)
   // ======================================================================
   const freeTeachers = useMemo(() => {
     if (!baseStats) return [];
     
     const busyTeacherNames = new Set(
       schedules
-        .filter(s => s.thu === radarDay && s.buoi === radarSession && s.tiet === radarPeriod)
-        .map(s => s.giao_vien)
+        .filter(s => {
+          // Ép kiểu cực mạnh để không bị lỗi so sánh
+          const isSameDay = Number(s.thu) === Number(radarDay);
+          const isSameSession = String(s.buoi).trim().toLowerCase() === String(radarSession).trim().toLowerCase();
+          const isSamePeriod = Number(s.tiet) === Number(radarPeriod);
+          return isSameDay && isSameSession && isSamePeriod;
+        })
+        .map(s => String(s.giao_vien).trim())
     );
 
     return baseStats.teacherLoads
-      .filter(t => !busyTeacherNames.has(t.name))
+      .filter(t => !busyTeacherNames.has(String(t.name).trim()))
       .filter(t => radarDept ? t.group === radarDept : true)
-      .sort((a, b) => a.load - b.load); // Sắp xếp theo số tiết (ưu tiên người rảnh nhất)
+      .sort((a, b) => a.load - b.load);
   }, [schedules, baseStats, radarDay, radarSession, radarPeriod, radarDept]);
 
-  // Thuật toán nhóm Giáo viên theo Tổ
   const groupedFreeTeachers = useMemo(() => {
     const groups: Record<string, typeof freeTeachers> = {};
     freeTeachers.forEach(t => {
-      if (!groups[t.group]) groups[t.group] = [];
-      groups[t.group].push(t);
+      const groupName = t.group || 'Chưa phân tổ';
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(t);
     });
     
-    // Sắp xếp tên tổ theo bảng chữ cái
     return Object.keys(groups).sort().map(groupName => ({
       group: groupName,
       teachers: groups[groupName]
@@ -223,9 +231,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* ================================================================= */}
-        {/* GIAO DIỆN DANH BẠ GIÁO VIÊN CHỦ NHIỆM */}
-        {/* ================================================================= */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col h-[600px]">
           <div className="flex items-center mb-5 border-b pb-3 border-gray-100">
             <Contact className="w-5 h-5 mr-2 text-indigo-500"/><h3 className="text-lg font-bold text-gray-900">Danh bạ Giáo viên Chủ nhiệm</h3>
@@ -267,9 +272,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           </div>
         </div>
 
-        {/* ================================================================= */}
-        {/* 🔥 GIAO DIỆN RADAR ĐÃ ĐƯỢC NHÓM THEO TỔ CHUYÊN MÔN */}
-        {/* ================================================================= */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-emerald-200 flex flex-col h-[600px]">
           <div className="flex items-center mb-5 border-b pb-3 border-emerald-100">
             <Radar className="w-5 h-5 mr-2 text-emerald-500"/><h3 className="text-lg font-bold text-gray-900">Radar Tìm giáo viên trống</h3>
@@ -301,13 +303,11 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           <div className="flex-1 overflow-y-auto border-x border-b border-emerald-200 rounded-b-lg bg-gray-50/50">
             {groupedFreeTeachers.length > 0 ? groupedFreeTeachers.map(group => (
               <div key={group.group} className="mb-3 last:mb-0">
-                {/* Header Tên Tổ */}
                 <div className="bg-emerald-100/80 px-4 py-2 text-xs font-bold text-emerald-900 border-y border-emerald-200 sticky top-0 backdrop-blur-sm z-10 flex justify-between">
                   <span>{group.group}</span>
                   <span className="bg-emerald-200 text-emerald-800 px-2 rounded-full">{group.teachers.length}</span>
                 </div>
                 
-                {/* Danh sách Giáo viên trong Tổ */}
                 <div className="divide-y divide-emerald-50 border-b border-emerald-100">
                   {group.teachers.map(t => (
                     <div key={t.name} className="flex items-center justify-between px-4 py-2.5 bg-white hover:bg-emerald-50 transition-colors">

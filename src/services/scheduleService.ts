@@ -60,7 +60,46 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 HÀM MỚI 1: LƯU SỐ TUẦN ÁP DỤNG CHO PHIÊN BẢN
+  // 🔥 HÀM MỚI: CẬP NHẬT TRÚNG ĐÍCH TÊN GIÁO VIÊN TRONG LỊCH DẠY
+  async updateTeacherInSchedules(oldName: string, newName: string): Promise<void> {
+    try {
+      // 1. Lấy tất cả các tiết dạy của giáo viên cũ
+      const q = query(collection(db, COLLECTION_NAME), where('giao_vien', '==', oldName));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) return;
+
+      // 2. Cập nhật thành tên mới (Chia batch 500 để an toàn)
+      const MAX_BATCH_SIZE = 500;
+      let currentBatch = writeBatch(db);
+      let operationCount = 0;
+      const commitPromises: Promise<void>[] = [];
+
+      snapshot.forEach(document => {
+        currentBatch.update(document.ref, { giao_vien: newName });
+        operationCount++;
+
+        if (operationCount === MAX_BATCH_SIZE) {
+          commitPromises.push(currentBatch.commit());
+          currentBatch = writeBatch(db);
+          operationCount = 0;
+        }
+      });
+
+      if (operationCount > 0) {
+        commitPromises.push(currentBatch.commit());
+      }
+
+      await Promise.all(commitPromises);
+      
+      cachedSchedules = null; // Xóa bộ nhớ đệm vì lịch đã thay đổi
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, COLLECTION_NAME);
+      throw error;
+    }
+  },
+
+  // 🔥 LƯU SỐ TUẦN ÁP DỤNG CHO PHIÊN BẢN
   async saveVersionWeeks(versionName: string, weeks: number): Promise<void> {
     try {
       const docRef = doc(db, CONFIG_COLLECTION, versionName);
@@ -75,7 +114,7 @@ export const scheduleService = {
     }
   },
 
-  // 🔥 HÀM MỚI 2: LẤY TẤT CẢ CẤU HÌNH PHIÊN BẢN
+  // 🔥 LẤY TẤT CẢ CẤU HÌNH PHIÊN BẢN
   async getVersionConfigs(): Promise<any[]> {
     try {
       const snapshot = await getDocs(collection(db, CONFIG_COLLECTION));

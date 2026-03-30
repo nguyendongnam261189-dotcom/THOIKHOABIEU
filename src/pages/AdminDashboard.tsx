@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle, Settings } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
@@ -41,6 +41,12 @@ export const AdminDashboard: React.FC = () => {
   const [selectedKTClass, setSelectedKTClass] = useState<string>('');
   const [ktStudentName, setKtStudentName] = useState<string>('');
   const [selectedExportDept, setSelectedExportDept] = useState<string>('');
+
+  // 🔥 STATE CHO THÔNG TIN IN ẤN BÁO CÁO
+  const [semesterConfig, setSemesterConfig] = useState('HỌC KÌ 1- NH 2024-2025');
+  const [principalName, setPrincipalName] = useState('');
+  const [vicePrincipalName, setVicePrincipalName] = useState('');
+  const [ttcmName, setTtcmName] = useState('');
 
   const availablePcgdNames = useMemo(() => {
       return Array.from(new Set(teachers.map(t => t.name))).filter(n => n !== 'Chưa rõ').sort();
@@ -343,7 +349,7 @@ export const AdminDashboard: React.FC = () => {
 
 
   // =====================================================================
-  // 🔥 XUẤT EXCEL CHUẨN MẪU 1: 1 SHEET TỔNG HỢP + MỖI GV 1 SHEET A4
+  // 🔥 XUẤT EXCEL CHUẨN MẪU 1 VÀ TẠO CHỖ TRỐNG CHO CHỮ KÝ
   // =====================================================================
   const exportIntegratedReport = async () => {
     setLoading(true);
@@ -429,8 +435,8 @@ export const AdminDashboard: React.FC = () => {
         if (teachersDataToPrint.length > 0) {
           hasData = true;
 
-          // 1. SHEET TỔNG HỢP TỔ (Giữ nguyên)
-          const wsSummary = wb.addWorksheet(`TH - ${dept.substring(0, 15)}`);
+          // 1. SHEET TỔNG HỢP TỔ
+          const wsSummary = wb.addWorksheet(`TH - ${dept.substring(0, 20).replace(/[\\/?*\[\]]/g, '')}`);
           wsSummary.columns = [
             { width: 8 },  // STT
             { width: 35 }, // Họ và tên
@@ -444,7 +450,7 @@ export const AdminDashboard: React.FC = () => {
           wsSummary.getCell('A1').alignment = { horizontal: 'center' };
 
           wsSummary.mergeCells('A2:D2');
-          wsSummary.getCell('A2').value = `(Học kì 1 - Năm học 2024-2025)`;
+          wsSummary.getCell('A2').value = `(${semesterConfig})`;
           wsSummary.getCell('A2').font = { name: 'Times New Roman', size: 12, italic: true };
           wsSummary.getCell('A2').alignment = { horizontal: 'center' };
 
@@ -472,9 +478,8 @@ export const AdminDashboard: React.FC = () => {
           for(let i=1; i<=4; i++) sumFooter.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
 
-          // 2. MỖI GIÁO VIÊN 1 SHEET A4
+          // 2. MỖI GIÁO VIÊN 1 SHEET CĂN CHUẨN A4
           teachersDataToPrint.forEach((tData) => {
-            // Tên sheet giới hạn 31 ký tự theo chuẩn Excel
             const safeSheetName = tData.teacherName.replace(/[\\/?*\[\]]/g, '').substring(0, 31);
             const ws = wb.addWorksheet(safeSheetName);
             
@@ -485,7 +490,7 @@ export const AdminDashboard: React.FC = () => {
               fitToPage: true,
               fitToWidth: 1,
               fitToHeight: 1,
-              margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 }
+              margins: { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 }
             };
 
             ws.columns = [
@@ -517,7 +522,7 @@ export const AdminDashboard: React.FC = () => {
             r++;
 
             ws.mergeCells(`A${r}:D${r}`);
-            ws.getCell(`A${r}`).value = '(HỌC KÌ 1- NH 2024-2025)';
+            ws.getCell(`A${r}`).value = `(${semesterConfig})`;
             ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
             r += 2;
@@ -578,6 +583,7 @@ export const AdminDashboard: React.FC = () => {
               r++;
             });
 
+            // Tổng cộng
             ws.mergeCells(`A${r}:B${r}`);
             ws.getCell(`A${r}`).value = 'Tổng cộng';
             ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
@@ -589,33 +595,37 @@ export const AdminDashboard: React.FC = () => {
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
             ws.getCell(`C${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-            
             ws.getCell(`D${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
             r += 2;
 
+            // ================= CHỮ KÝ =================
             ws.mergeCells(`C${r}:D${r}`);
             ws.getCell(`C${r}`).value = dateString;
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, italic: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
             r++;
 
+            ws.mergeCells(`A${r}:B${r}`);
+            ws.getCell(`A${r}`).value = 'Xác nhận của Tổ trưởng chuyên môn';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+
             ws.mergeCells(`C${r}:D${r}`);
             ws.getCell(`C${r}`).value = 'Người kê khai';
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
-            r++;
+            r += 4; // Bỏ trống 3 dòng để ký tên
+
+            ws.mergeCells(`A${r}:B${r}`);
+            ws.getCell(`A${r}`).value = ttcmName || '';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
 
             ws.mergeCells(`C${r}:D${r}`);
             ws.getCell(`C${r}`).value = tData.teacherName;
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
             r += 2;
-
-            ws.mergeCells(`A${r}:B${r}`);
-            ws.getCell(`A${r}`).value = 'Xác nhận của Tổ trưởng chuyên môn';
-            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
-            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
-            r += 4;
 
             ws.mergeCells(`A${r}:B${r}`);
             ws.getCell(`A${r}`).value = 'Xác nhận Phó Hiệu trưởng';
@@ -626,15 +636,15 @@ export const AdminDashboard: React.FC = () => {
             ws.getCell(`C${r}`).value = 'Xác nhận của Hiệu trưởng';
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
-            r += 5;
+            r += 4; // Bỏ trống 3 dòng để ký tên
 
             ws.mergeCells(`A${r}:B${r}`);
-            ws.getCell(`A${r}`).value = 'Nguyễn Thị Quyết';
+            ws.getCell(`A${r}`).value = vicePrincipalName || '';
             ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
 
             ws.mergeCells(`C${r}:D${r}`);
-            ws.getCell(`C${r}`).value = 'Bùi Duy Quốc';
+            ws.getCell(`C${r}`).value = principalName || '';
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
           });
@@ -662,6 +672,7 @@ export const AdminDashboard: React.FC = () => {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4 relative">
       
+      {/* CÁC MODAL DICTIONARY & MAPPING GIỮ NGUYÊN */}
       {showDictionaryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
           <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-full border border-indigo-100">
@@ -857,10 +868,10 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* MODULE QUẢN LÝ DỮ LIỆU */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
-          
           <button 
             onClick={handleOpenDictionary}
             className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-bold transition-colors"
@@ -929,7 +940,7 @@ export const AdminDashboard: React.FC = () => {
         <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-2">
           <BarChart3 className="mr-2 text-emerald-600" /> Xuất Bảng Kê Khai Chế Độ Khuyết Tật (Mẫu 1)
         </h3>
-        <p className="text-sm text-gray-500 mb-6">Thêm danh sách các lớp có học sinh khuyết tật hòa nhập để hệ thống tự động bóc tách công thức theo từng TKB.</p>
+        <p className="text-sm text-gray-500 mb-6">Thêm danh sách lớp có học sinh khuyết tật để tự động bóc tách số tiết theo từng TKB. File Excel tải về đã được căn chỉnh khổ A4 chuẩn in ấn.</p>
 
         {/* Form Khai Báo */}
         <div className="flex flex-col md:flex-row gap-3 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
@@ -987,8 +998,45 @@ export const AdminDashboard: React.FC = () => {
           )}
         </div>
 
+        {/* 🔥 TÙY CHỈNH THÔNG TIN KÝ DUYỆT TRƯỚC KHI XUẤT */}
+        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6">
+          <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center"><Settings className="w-4 h-4 mr-2 text-gray-500" /> Tùy chỉnh thông tin Ký duyệt</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 uppercase">Học kì - Năm học</label>
+              <input 
+                type="text" 
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-bold text-gray-800 focus:border-emerald-500 outline-none" 
+                value={semesterConfig} 
+                onChange={e => setSemesterConfig(e.target.value)} 
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 uppercase">Hiệu trưởng</label>
+              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:border-emerald-500 outline-none" value={principalName} onChange={e => setPrincipalName(e.target.value)}>
+                <option value="">-- Chọn Hiệu trưởng --</option>
+                {availablePcgdNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 uppercase">Phó Hiệu trưởng</label>
+              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:border-emerald-500 outline-none" value={vicePrincipalName} onChange={e => setVicePrincipalName(e.target.value)}>
+                <option value="">-- Chọn Phó HT --</option>
+                {availablePcgdNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 uppercase">Tổ trưởng CM (Tùy chọn)</label>
+              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:border-emerald-500 outline-none" value={ttcmName} onChange={e => setTtcmName(e.target.value)}>
+                <option value="">-- Để trống nếu xuất nhiều tổ --</option>
+                {availablePcgdNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
         {/* Nút Xuất Excel Mẫu 1 kèm Bộ Lọc Tổ */}
-        <div className="flex flex-col md:flex-row gap-3 pt-4 border-t border-emerald-100">
+        <div className="flex flex-col md:flex-row gap-3 pt-2">
           <select 
             className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full md:w-64 shadow-sm"
             value={selectedExportDept}
@@ -1004,7 +1052,7 @@ export const AdminDashboard: React.FC = () => {
             className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-3 rounded-xl font-bold shadow-lg text-lg transition-colors flex items-center justify-center"
           >
             {loading ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <FileSpreadsheet className="mr-3 h-6 w-6" />}
-            {loading ? 'ĐANG XỬ LÝ DỮ LIỆU EXCEL...' : 'TẢI BÁO CÁO KHUYẾT TẬT'}
+            {loading ? 'ĐANG DÀN TRANG A4 VÀ XUẤT EXCEL...' : 'TẢI BÁO CÁO KHUYẾT TẬT'}
           </button>
         </div>
       </div>

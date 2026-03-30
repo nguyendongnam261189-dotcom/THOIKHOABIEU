@@ -4,9 +4,9 @@ import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
-import * as XLSX from 'xlsx'; // Vẫn giữ để đọc file Upload
-import ExcelJS from 'exceljs'; // 🔥 VŨ KHÍ MỚI ĐỂ VẼ MẪU 1
-import { saveAs } from 'file-saver'; // Dùng để tải file ExcelJS xuống
+import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 const DEPARTMENTS = ['Toán - Tin', 'Văn - GDCD', 'Sử - Địa', 'KHTN và Công nghệ', 'Ngoại ngữ', 'Nghệ thuật - Thể chất', 'Chung'];
 
@@ -40,9 +40,14 @@ export const AdminDashboard: React.FC = () => {
   const [ktStudents, setKtStudents] = useState<Record<string, string>>({});
   const [selectedKTClass, setSelectedKTClass] = useState<string>('');
   const [ktStudentName, setKtStudentName] = useState<string>('');
+  const [selectedExportDept, setSelectedExportDept] = useState<string>('');
 
   const availablePcgdNames = useMemo(() => {
       return Array.from(new Set(teachers.map(t => t.name))).filter(n => n !== 'Chưa rõ').sort();
+  }, [teachers]);
+
+  const dynamicDepartments = useMemo(() => {
+      return Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort();
   }, [teachers]);
 
   const loadData = async () => {
@@ -338,24 +343,22 @@ export const AdminDashboard: React.FC = () => {
 
 
   // =====================================================================
-  // 🔥 THUẬT TOÁN XUẤT EXCEL CHUẨN MẪU 1 VỚI EXCELJS
+  // 🔥 XUẤT EXCEL CHUẨN MẪU 1: 1 SHEET TỔNG HỢP + MỖI GV 1 SHEET A4
   // =====================================================================
   const exportIntegratedReport = async () => {
     setLoading(true);
     try {
       const wb = new ExcelJS.Workbook();
-      const depts = Array.from(new Set(teachers.map(t => t.group || 'Chung'))).sort();
+      const deptsToExport = selectedExportDept ? [selectedExportDept] : dynamicDepartments;
       let hasData = false;
 
-      // Lấy thời gian hiện tại cho phần ngày ký
       const today = new Date();
       const dateString = `Hòa Khánh, ngày ${today.getDate().toString().padStart(2, '0')} tháng ${String(today.getMonth() + 1).padStart(2, '0')} năm ${today.getFullYear()}`;
 
-      for (const dept of depts) {
+      for (const dept of deptsToExport) {
         const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
-        
-        // Khởi tạo mảng lưu dữ liệu của các giáo viên có dạy lớp KT
         const teachersDataToPrint: any[] = [];
+        let totalDeptPeriods = 0; 
 
         deptTeachers.forEach(teacher => {
           const teacherRecords: any[] = [];
@@ -365,7 +368,6 @@ export const AdminDashboard: React.FC = () => {
           Object.entries(ktStudents).forEach(([className, studentName]) => {
             const subjects = new Set<string>();
             
-            // Tìm các môn giáo viên dạy ở lớp này
             allSchedules.forEach(s => {
               if (s.giao_vien === teacher.name && s.lop.split(',').map(c => c.trim()).includes(className)) {
                 subjects.add(isHDTNType(s.mon) ? 'HĐTN' : s.mon);
@@ -413,6 +415,7 @@ export const AdminDashboard: React.FC = () => {
           });
 
           if (teacherRecords.length > 0) {
+            totalDeptPeriods += teacherTotal;
             teachersDataToPrint.push({
               teacherName: teacher.name,
               subjects: Array.from(teacherSubjects).join(', '),
@@ -422,23 +425,78 @@ export const AdminDashboard: React.FC = () => {
           }
         });
 
-        // 🟢 VẼ SHEET EXCEL NẾU TỔ CÓ DỮ LIỆU
+        // 🟢 TIẾN HÀNH VẼ CÁC SHEET CHO TỔ
         if (teachersDataToPrint.length > 0) {
           hasData = true;
-          const ws = wb.addWorksheet(`Tổ ${dept.substring(0, 25)}`);
-          
-          // Chỉnh độ rộng cột chuẩn Mẫu 1
-          ws.columns = [
-            { width: 6 },   // A: STT
-            { width: 35 },  // B: Lớp & Học sinh
-            { width: 45 },  // C: Tổng số giờ
-            { width: 15 }   // D: Ghi chú
+
+          // 1. SHEET TỔNG HỢP TỔ (Giữ nguyên)
+          const wsSummary = wb.addWorksheet(`TH - ${dept.substring(0, 15)}`);
+          wsSummary.columns = [
+            { width: 8 },  // STT
+            { width: 35 }, // Họ và tên
+            { width: 25 }, // Tổng số tiết
+            { width: 25 }  // Ghi chú
           ];
 
-          let r = 1; // Row pointer
+          wsSummary.mergeCells('A1:D1');
+          wsSummary.getCell('A1').value = `TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TỔ ${dept.toUpperCase()}`;
+          wsSummary.getCell('A1').font = { name: 'Times New Roman', size: 14, bold: true };
+          wsSummary.getCell('A1').alignment = { horizontal: 'center' };
 
+          wsSummary.mergeCells('A2:D2');
+          wsSummary.getCell('A2').value = `(Học kì 1 - Năm học 2024-2025)`;
+          wsSummary.getCell('A2').font = { name: 'Times New Roman', size: 12, italic: true };
+          wsSummary.getCell('A2').alignment = { horizontal: 'center' };
+
+          const sumHeader = wsSummary.getRow(4);
+          sumHeader.values = ['STT', 'Họ và tên giáo viên', 'Tổng số tiết KT', 'Ghi chú'];
+          sumHeader.font = { name: 'Times New Roman', size: 12, bold: true };
+          sumHeader.alignment = { horizontal: 'center', vertical: 'middle' };
+          for(let i=1; i<=4; i++) sumHeader.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+
+          let sr = 5;
+          teachersDataToPrint.forEach((tData, idx) => {
+            const row = wsSummary.getRow(sr);
+            row.values = [idx + 1, tData.teacherName, tData.total, ''];
+            row.font = { name: 'Times New Roman', size: 12 };
+            row.getCell(1).alignment = { horizontal: 'center' };
+            row.getCell(3).alignment = { horizontal: 'center', font: {bold: true} };
+            for(let i=1; i<=4; i++) row.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            sr++;
+          });
+
+          const sumFooter = wsSummary.getRow(sr);
+          sumFooter.values = ['', 'TỔNG CỘNG TOÀN TỔ', totalDeptPeriods, ''];
+          sumFooter.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: 'FF0000' } };
+          sumFooter.getCell(3).alignment = { horizontal: 'center' };
+          for(let i=1; i<=4; i++) sumFooter.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+
+
+          // 2. MỖI GIÁO VIÊN 1 SHEET A4
           teachersDataToPrint.forEach((tData) => {
-            // Header: Đơn vị / Mẫu 1
+            // Tên sheet giới hạn 31 ký tự theo chuẩn Excel
+            const safeSheetName = tData.teacherName.replace(/[\\/?*\[\]]/g, '').substring(0, 31);
+            const ws = wb.addWorksheet(safeSheetName);
+            
+            // Cài đặt trang A4 (paperSize: 9), lề chuẩn in ấn
+            ws.pageSetup = {
+              paperSize: 9, 
+              orientation: 'portrait',
+              fitToPage: true,
+              fitToWidth: 1,
+              fitToHeight: 1,
+              margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 }
+            };
+
+            ws.columns = [
+              { width: 6 },   // A: STT
+              { width: 35 },  // B: Lớp & Học sinh
+              { width: 45 },  // C: Tổng số giờ
+              { width: 15 }   // D: Ghi chú
+            ];
+
+            let r = 1; 
+
             ws.getCell(`A${r}`).value = 'Đơn vị: Trường THCS Nguyễn Bỉnh Khiêm';
             ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`D${r}`).value = 'Mẫu 1';
@@ -446,7 +504,6 @@ export const AdminDashboard: React.FC = () => {
             ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
             r++;
 
-            // Header: BẢNG KÊ KHAI
             ws.mergeCells(`A${r}:D${r}`);
             ws.getCell(`A${r}`).value = 'BẢNG KÊ KHAI';
             ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 14, bold: true };
@@ -465,7 +522,6 @@ export const AdminDashboard: React.FC = () => {
             ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
             r += 2;
 
-            // Thông tin GV & Bộ môn
             ws.mergeCells(`A${r}:D${r}`);
             ws.getCell(`A${r}`).value = {
               richText: [
@@ -484,7 +540,6 @@ export const AdminDashboard: React.FC = () => {
             };
             r++;
 
-            // Vẽ tiêu đề bảng (Table Header)
             const headerRow = ws.getRow(r);
             headerRow.values = [
               'Stt', 
@@ -501,7 +556,6 @@ export const AdminDashboard: React.FC = () => {
             }
             r++;
 
-            // Đổ dữ liệu các môn dạy (Table Body)
             tData.records.forEach((rec: any, idx: number) => {
               const row = ws.getRow(r);
               row.values = [
@@ -524,7 +578,6 @@ export const AdminDashboard: React.FC = () => {
               r++;
             });
 
-            // Vẽ dòng Tổng cộng
             ws.mergeCells(`A${r}:B${r}`);
             ws.getCell(`A${r}`).value = 'Tổng cộng';
             ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
@@ -540,7 +593,6 @@ export const AdminDashboard: React.FC = () => {
             ws.getCell(`D${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
             r += 2;
 
-            // Khu vực Chữ ký
             ws.mergeCells(`C${r}:D${r}`);
             ws.getCell(`C${r}`).value = dateString;
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, italic: true };
@@ -585,23 +637,19 @@ export const AdminDashboard: React.FC = () => {
             ws.getCell(`C${r}`).value = 'Bùi Duy Quốc';
             ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
             ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
-
-            // Cắt trang để giáo viên tiếp theo nhảy sang trang in mới (tùy chọn)
-            r += 4; 
           });
         }
       }
 
       if (!hasData) {
-        alert("Không có dữ liệu tiết dạy nào khớp với danh sách lớp khuyết tật bạn vừa khai báo.");
+        alert("Không có dữ liệu tiết dạy nào khớp với bộ lọc và danh sách bạn vừa khai báo.");
         setLoading(false);
         return;
       }
 
-      // Lưu file Excel
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `Bao_Cao_Che_Do_Khuyet_Tat_Mau_1.xlsx`);
+      saveAs(blob, `Bao_Cao_Che_Do_Khuyet_Tat_${selectedExportDept || 'Toan_Truong'}.xlsx`);
 
     } catch (err) { 
       alert("Lỗi xuất file. Vui lòng kiểm tra lại."); 
@@ -789,12 +837,6 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   );
               })}
-
-              {filterDepartment && parseData.tkbTeachers.filter((t: any) => t.originalName !== 'Chưa rõ' && departmentMapping[t.originalName] === filterDepartment).length === 0 && (
-                <div className="text-center py-10 text-gray-400 italic bg-gray-50 rounded-b-lg border border-gray-100">
-                  Không có giáo viên nào thuộc tổ "{filterDepartment}" trong TKB này.
-                </div>
-              )}
             </div>
 
             <div className="p-4 border-t bg-gray-50 rounded-b-2xl flex justify-between items-center">
@@ -919,7 +961,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
 
         {/* Danh sách Lớp Khuyết tật đã Khai Báo */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h4 className="text-sm font-bold text-gray-700 mb-3 border-b pb-2">Danh sách đã thêm ({Object.keys(ktStudents).length})</h4>
           {Object.keys(ktStudents).length === 0 ? (
             <p className="text-sm text-gray-400 italic text-center py-6 bg-gray-50 rounded-lg border border-dashed border-gray-200">
@@ -945,15 +987,26 @@ export const AdminDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Nút Xuất Excel Mẫu 1 */}
-        <button 
-          onClick={exportIntegratedReport} 
-          disabled={Object.keys(ktStudents).length === 0 || versions.every(v => v.weeks === 0)} 
-          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg transition-colors flex items-center justify-center"
-        >
-          {loading ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <FileSpreadsheet className="mr-3 h-6 w-6" />}
-          {loading ? 'ĐANG XỬ LÝ DỮ LIỆU EXCEL...' : 'TẢI BẢNG KÊ KHAI CÁ NHÂN (MẪU 1)'}
-        </button>
+        {/* Nút Xuất Excel Mẫu 1 kèm Bộ Lọc Tổ */}
+        <div className="flex flex-col md:flex-row gap-3 pt-4 border-t border-emerald-100">
+          <select 
+            className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full md:w-64 shadow-sm"
+            value={selectedExportDept}
+            onChange={(e) => setSelectedExportDept(e.target.value)}
+          >
+            <option value="">Xuất Tất cả các Tổ</option>
+            {dynamicDepartments.map(d => <option key={d} value={d}>Chỉ xuất Tổ {d}</option>)}
+          </select>
+          
+          <button 
+            onClick={exportIntegratedReport} 
+            disabled={Object.keys(ktStudents).length === 0 || versions.every(v => v.weeks === 0)} 
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-3 rounded-xl font-bold shadow-lg text-lg transition-colors flex items-center justify-center"
+          >
+            {loading ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <FileSpreadsheet className="mr-3 h-6 w-6" />}
+            {loading ? 'ĐANG XỬ LÝ DỮ LIỆU EXCEL...' : 'TẢI BÁO CÁO KHUYẾT TẬT'}
+          </button>
+        </div>
       </div>
     </div>
   );

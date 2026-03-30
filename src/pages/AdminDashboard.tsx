@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -17,32 +17,29 @@ export const AdminDashboard: React.FC = () => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [versionConfigs, setVersionConfigs] = useState<any[]>([]);
-  const [selectedKTLops, setSelectedKTLops] = useState<string[]>([]);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editingVersion, setEditingVersion] = useState<string | null>(null);
   const [newVersionName, setNewVersionName] = useState('');
 
-  // =====================================================================
-  // STATE CHO TÍNH NĂNG MAPPING 3 CỘT (KHI UPLOAD)
-  // =====================================================================
+  // STATE CHO MAPPING
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [parseData, setParseData] = useState<any>(null);
   const [teacherMapping, setTeacherMapping] = useState<Record<string, string>>({});
   const [departmentMapping, setDepartmentMapping] = useState<Record<string, string>>({});
   const [filterDepartment, setFilterDepartment] = useState<string>(''); 
 
-  // =====================================================================
-  // 🔥 STATE CHO TÍNH NĂNG QUẢN LÝ TỪ ĐIỂN (DOMINO)
-  // =====================================================================
+  // STATE CHO TỪ ĐIỂN
   const [showDictionaryModal, setShowDictionaryModal] = useState(false);
   const [dictionaryAliases, setDictionaryAliases] = useState<Record<string, string>>({});
   const [editingDictionary, setEditingDictionary] = useState<Record<string, string>>({});
   
-  // Dùng chính danh sách PCGD hiện tại làm từ điển quy chiếu (Nếu có TKB)
+  // 🔥 STATE CHO BÁO CÁO KHUYẾT TẬT
+  const [ktStudents, setKtStudents] = useState<Record<string, string>>({});
+  const [selectedKTClass, setSelectedKTClass] = useState<string>('');
+  const [ktStudentName, setKtStudentName] = useState<string>('');
+
   const availablePcgdNames = useMemo(() => {
-      // Vì danh sách gốc trong db.teachers chỉ chứa những người "đã từng được map"
-      // nên chúng ta sẽ ưu tiên lấy từ teachers hiện có
       return Array.from(new Set(teachers.map(t => t.name))).filter(n => n !== 'Chưa rõ').sort();
   }, [teachers]);
 
@@ -108,14 +105,21 @@ export const AdminDashboard: React.FC = () => {
     } catch (error) { console.error("Lỗi dọn rác GV:", error); }
   };
 
-  // =====================================================================
-  // BƯỚC 1: XỬ LÝ UPLOAD EXCEL VÀ MỞ BẢNG MAPPING
-  // =====================================================================
   const handleProcessExcel = async () => {
-    if (!file || !versionName.trim()) {
+    const vName = versionName.trim();
+    if (!file || !vName) {
       setStatus({ type: 'error', message: 'Vui lòng chọn file và nhập tên phiên bản.' });
       return;
     }
+
+    const existingVersionNames = versions.map(v => v.name);
+    if (existingVersionNames.includes(vName)) {
+      const confirmOverwrite = window.confirm(`Phiên bản "${vName}" đã tồn tại trên hệ thống. Bạn có muốn GHI ĐÈ (Xóa bản cũ và lưu bản mới này) không?`);
+      if (!confirmOverwrite) {
+        return; 
+      }
+    }
+
     setLoading(true);
     try {
       const data = await parseExcelFile(file);
@@ -162,11 +166,12 @@ export const AdminDashboard: React.FC = () => {
 
   const handleConfirmMapping = async () => {
     setLoading(true);
+    const vName = versionName.trim();
     try {
       const finalSchedules = parseData.rawSchedules.map((s: any) => ({
           ...s,
           giao_vien: teacherMapping[s.giao_vien] || s.giao_vien, 
-          versionName: versionName.trim()
+          versionName: vName
       }));
 
       const mergedTeachersMap = new Map<string, any>();
@@ -189,6 +194,11 @@ export const AdminDashboard: React.FC = () => {
           return { id: '', name: t.name, subject: sortedSubjects.join(', '), group: t.group } as Teacher;
       });
 
+      const existingVersionNames = versions.map(v => v.name);
+      if (existingVersionNames.includes(vName)) {
+        await scheduleService.deleteScheduleByVersion(vName);
+      }
+
       await scheduleService.saveSchedules(finalSchedules); 
       await teacherService.saveTeachers(finalTeachers);
       
@@ -199,14 +209,11 @@ export const AdminDashboard: React.FC = () => {
       }
       
       await garbageCollectTeachers();
-      setStatus({ type: 'success', message: `Đã cập nhật TKB thành công!` });
+      setStatus({ type: 'success', message: `Đã ${existingVersionNames.includes(vName) ? 'Ghi đè' : 'Tạo mới'} TKB thành công!` });
       setVersionName(''); setFile(null); setShowMappingModal(false); loadData();
     } catch (error) { setStatus({ type: 'error', message: `Lỗi khi lưu dữ liệu TKB.` }); } finally { setLoading(false); }
   };
 
-  // =====================================================================
-  // 🔥 TÍNH NĂNG MỚI: MỞ BẢNG QUẢN LÝ TỪ ĐIỂN
-  // =====================================================================
   const handleOpenDictionary = async () => {
     setLoading(true);
     try {
@@ -225,27 +232,24 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // 🔥 THUẬT TOÁN BÁO ĐỎ VÒNG HOÁN VỊ (DOMINO)
   const getDominoConflicts = () => {
       const conflicts = new Set<string>();
       const fullNames = Object.values(editingDictionary).filter(Boolean);
       
-      // Nếu 1 tên FullName xuất hiện 2 lần -> Xung đột!
       const counts: Record<string, number> = {};
       fullNames.forEach(name => { counts[name] = (counts[name] || 0) + 1; });
       
       Object.entries(editingDictionary).forEach(([short, full]) => {
-          if (!full) conflicts.add(short); // Cảnh báo Đỏ nếu để trống
-          if (full && counts[full] > 1) conflicts.add(short); // Cảnh báo Đỏ nếu trùng người khác
+          if (!full) conflicts.add(short); 
+          if (full && counts[full] > 1) conflicts.add(short); 
       });
       return conflicts;
   };
 
   const conflicts = useMemo(() => getDominoConflicts(), [editingDictionary]);
 
-  // 🔥 LƯU TỪ ĐIỂN VÀ CẬP NHẬT TRÚNG ĐÍCH LỊCH DẠY CŨ
   const handleSaveDictionary = async () => {
-      if (conflicts.size > 0) return; // Khóa an toàn, không cho lưu nếu còn lỗi đỏ
+      if (conflicts.size > 0) return; 
       setLoading(true);
       try {
           const changedAliases: { short: string, oldFull: string, newFull: string }[] = [];
@@ -258,17 +262,12 @@ export const AdminDashboard: React.FC = () => {
           });
 
           if (changedAliases.length > 0) {
-              // 1. Cập nhật lại Từ điển
               await (teacherService as any).saveTeacherAliases(editingDictionary);
-              
-              // 2. Chạy hàm Cập nhật Trúng đích trong TKB
               if (typeof (scheduleService as any).updateTeacherInSchedules === 'function') {
                   for (const change of changedAliases) {
                       await (scheduleService as any).updateTeacherInSchedules(change.oldFull, change.newFull);
                   }
               }
-
-              // 3. Dọn Rác (Xóa hồ sơ cũ nếu bị mồ côi)
               await garbageCollectTeachers();
               await loadData();
           }
@@ -292,7 +291,6 @@ export const AdminDashboard: React.FC = () => {
         setDictionaryAliases(newDict);
     } catch (e) { alert("Lỗi xóa bí danh"); }
   };
-
 
   const handleSaveWeeks = async (vName: string, weeks: number) => {
     try { await scheduleService.saveVersionWeeks(vName, weeks); loadData(); } catch (error) { alert("Lỗi lưu số tuần."); }
@@ -322,47 +320,136 @@ export const AdminDashboard: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
+  // =====================================================================
+  // 🔥 XỬ LÝ KHAI BÁO & XUẤT EXCEL CHẾ ĐỘ KHUYẾT TẬT THEO MẪU 1
+  // =====================================================================
+  const handleAddKTClass = () => {
+    if (selectedKTClass && ktStudentName.trim()) {
+      setKtStudents(prev => ({ ...prev, [selectedKTClass]: ktStudentName.trim() }));
+      setSelectedKTClass('');
+      setKtStudentName('');
+    }
+  };
+
+  const handleRemoveKTClass = (className: string) => {
+    const newKt = { ...ktStudents };
+    delete newKt[className];
+    setKtStudents(newKt);
+  };
+
   const exportIntegratedReport = () => {
     try {
       const wb = XLSX.utils.book_new();
-      const ktLopSet = new Set(selectedKTLops);
-      const summaryData: any[] = [];
       const depts = Array.from(new Set(teachers.map(t => t.group || 'Chung'))).sort();
-      let grandTotal = 0;
+      let hasData = false;
 
       depts.forEach(dept => {
         const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
-        const rows: any[] = []; let deptTotal = 0;
-        deptTeachers.forEach((teacher) => {
-          let teacherTotalKT = 0; let detailsArr: string[] = []; let classesTaughtSet = new Set<string>();
-          versions.forEach(v => {
-            if (v.weeks <= 0) return;
-            const vPeriods = allSchedules.filter(s => s.versionName === v.name && s.giao_vien === teacher.name && s.lop.split(', ').some(l => ktLopSet.has(l.trim())));
-            if (vPeriods.length === 0) return;
-            const classesAsCN = new Set<string>();
-            vPeriods.forEach(p => { if (isHDTNType(p.mon)) p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => classesAsCN.add(ml)); });
-            const normalPeriods = vPeriods.filter(p => !isHDTNType(p.mon));
-            const classCountMap: Record<string, number> = {}; let subTotalVersion = 0;
-            normalPeriods.forEach(p => { p.lop.split(', ').map(l => l.trim()).filter(l => ktLopSet.has(l)).forEach(ml => { const cleanLop = ml.replace(/\./g, '/'); classCountMap[cleanLop] = (classCountMap[cleanLop] || 0) + 1; classesTaughtSet.add(cleanLop); subTotalVersion += 1; }); });
-            classesAsCN.forEach(ml => { const cleanLop = ml.replace(/\./g, '/'); const key = `HĐTN (CN) lớp ${cleanLop}`; classCountMap[key] = 3; classesTaughtSet.add(cleanLop); subTotalVersion += 3; });
-            if (subTotalVersion > 0) { teacherTotalKT += (subTotalVersion * v.weeks); detailsArr.push(`[${Object.entries(classCountMap).map(([l, c]) => `${c}t ${l}`).join(' + ')}] x ${v.weeks} tuần`); }
+        const wsData: any[][] = [];
+
+        deptTeachers.forEach(teacher => {
+          const teacherRecords: any[] = [];
+          let teacherTotal = 0;
+          const teacherSubjects = new Set<string>();
+
+          Object.entries(ktStudents).forEach(([className, studentName]) => {
+            const subjects = new Set<string>();
+            
+            // Tìm tất cả các môn giáo viên này dạy ở lớp KT
+            allSchedules.forEach(s => {
+              if (s.giao_vien === teacher.name && s.lop.split(',').map(c => c.trim()).includes(className)) {
+                subjects.add(isHDTNType(s.mon) ? 'HĐTN' : s.mon);
+              }
+            });
+
+            subjects.forEach(subject => {
+              const parts: { p: number, w: number }[] = [];
+              let totalW = 0;
+              let totalP = 0;
+
+              // Quét qua toàn bộ TKB để tính số tiết / tuần
+              versions.forEach(v => {
+                if (v.weeks <= 0) return;
+                let count = 0;
+                const vSchedules = allSchedules.filter(s => s.versionName === v.name && s.giao_vien === teacher.name && s.lop.split(',').map(c => c.trim()).includes(className));
+
+                if (subject === 'HĐTN') {
+                  const hasHDTN = vSchedules.some(s => isHDTNType(s.mon));
+                  if (hasHDTN) count = 3; // Mặc định HĐTN/GVCN tính 3 tiết
+                } else {
+                  count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === subject).length;
+                }
+
+                if (count > 0) {
+                  parts.push({ p: count, w: v.weeks });
+                  totalW += v.weeks;
+                  totalP += count * v.weeks;
+                }
+              });
+
+              if (totalP > 0) {
+                teacherTotal += totalP;
+                teacherSubjects.add(subject);
+                
+                // Thuật toán kiểm tra số tiết có bị thay đổi giữa các TKB không
+                const isConstant = parts.every(pt => pt.p === parts[0].p);
+                let formula = '';
+                if (isConstant) {
+                  formula = `${subject}: ${parts[0].p}(tiết/tuần) x ${totalW} = ${totalP} tiết`;
+                } else {
+                  formula = `${subject}: ${parts.map(pt => `[${pt.p}t x ${pt.w} tuần]`).join(' + ')} = ${totalP} tiết`;
+                }
+                teacherRecords.push({ studentName, className, formula, totalP });
+              }
+            });
           });
-          if (teacherTotalKT > 0) { rows.push({ 'STT': rows.length + 1, 'Họ và tên': teacher.name, 'Lớp dạy': Array.from(classesTaughtSet).join(', '), 'Số tiết': teacherTotalKT, 'Công thức tính': detailsArr.join(' + ') + ` = ${teacherTotalKT} tiết` }); deptTotal += teacherTotalKT; }
+
+          // Tạo Bảng biểu Mẫu 1 cho Giáo viên
+          if (teacherRecords.length > 0) {
+            hasData = true;
+            wsData.push(['Đơn vị: .......................................', '', '', 'Mẫu 1']);
+            wsData.push(['', 'BẢNG KÊ KHAI', '', '']);
+            wsData.push(['', 'SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT', '', '']);
+            wsData.push(['', '(HỌC KÌ ... - NĂM HỌC 2024-2025)', '', '']);
+            wsData.push([`Giáo viên giảng dạy: ${teacher.name.toUpperCase()}`, '', '', '']);
+            wsData.push([`Bộ môn: ${Array.from(teacherSubjects).join(', ').toUpperCase()}`, '', '', '']);
+            wsData.push(['Stt', 'Lớp có người khuyết tật ghi rõ\n(họ tên và lớp)', 'Tổng số giờ dạy/tiết dạy ghi rõ\n(số tiết/tuần x số tuần)', 'Ghi chú']);
+
+            teacherRecords.forEach((rec, idx) => {
+              wsData.push([
+                idx + 1,
+                `${rec.studentName}\nLớp ${rec.className.replace(/\./g, '/')}`,
+                rec.formula,
+                ''
+              ]);
+            });
+
+            wsData.push(['', 'Tổng cộng', `${teacherTotal} tiết`, '']);
+            wsData.push(['', '', '', '']); // Dòng trống cách biệt giữa các giáo viên
+            wsData.push(['', '', '', '']);
+          }
         });
-        if (rows.length > 0) { summaryData.push({ 'STT': summaryData.length + 1, 'Tổ chuyên môn': dept, 'Tổng số tiết': deptTotal }); grandTotal += deptTotal; rows.push({ 'STT': '', 'Họ và tên': 'TỔNG CỘNG TỔ', 'Lớp dạy': '', 'Số tiết': deptTotal, 'Công thức tính': '' }); const ws = XLSX.utils.json_to_sheet([]); XLSX.utils.sheet_add_aoa(ws, [[`BÁO CÁO TIẾT DẠY LỚP KHUYẾT TẬT - TỔ: ${dept.toUpperCase()}`]], { origin: 'A1' }); XLSX.utils.sheet_add_json(ws, rows, { origin: 'A3' }); ws['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 80 }]; XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`); }
+
+        // Tạo Sheet cho Tổ
+        if (wsData.length > 0) {
+          const ws = XLSX.utils.aoa_to_sheet(wsData);
+          ws['!cols'] = [{ wch: 8 }, { wch: 40 }, { wch: 50 }, { wch: 15 }];
+          XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`);
+        }
       });
-      const summaryRows = [['BÁO CÁO TỔNG HỢP TIẾT DẠY LỚP KHUYẾT TẬT'], [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')}`], [], ['STT', 'Tổ chuyên môn', 'Tổng số tiết']];
-      summaryData.forEach(item => summaryRows.push([item.STT, item['Tổ chuyên môn'], item['Tổng số tiết']]));
-      summaryRows.push(['', 'TỔNG CỘNG TOÀN TRƯỜNG', grandTotal]); const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows); wsSummary['!cols'] = [{ wch: 5 }, { wch: 40 }, { wch: 20 }]; const finalWb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(finalWb, wsSummary, 'TỔNG HỢP TOÀN TRƯỜNG'); wb.SheetNames.forEach(name => XLSX.utils.book_append_sheet(finalWb, wb.Sheets[name], name)); XLSX.writeFile(finalWb, `Bao_Cao_Che_Do_Khuyet_Tat_Vinh_Vien.xlsx`);
-    } catch (err) { alert("Lỗi xuất file."); }
+
+      if (!hasData) {
+        alert("Không có dữ liệu tiết dạy nào khớp với danh sách lớp khuyết tật bạn vừa khai báo.");
+        return;
+      }
+
+      XLSX.writeFile(wb, `Bao_Cao_Che_Do_Khuyet_Tat_Mau_1.xlsx`);
+    } catch (err) { alert("Lỗi xuất file."); console.error(err); }
   };
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4 relative">
       
-      {/* ================================================================= */}
-      {/* 🔥 MODAL 2: QUẢN LÝ TỪ ĐIỂN VÀ CHỐNG DOMINO */}
-      {/* ================================================================= */}
       {showDictionaryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
           <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-full border border-indigo-100">
@@ -388,12 +475,10 @@ export const AdminDashboard: React.FC = () => {
                           <div className="col-span-1 text-center">Xóa</div>
                       </div>
 
-                      {/* Sắp xếp: Ưu tiên dòng bị LỖI ĐỎ (Domino) lên trên cùng */}
                       {Object.keys(editingDictionary)
                           .sort((a, b) => (conflicts.has(b) ? 1 : 0) - (conflicts.has(a) ? 1 : 0))
                           .map((shortName) => {
                           const isConflict = conflicts.has(shortName);
-                          // Lọc Options: Chỉ lấy những người đang chưa có chủ (để gợi ý sửa lỗi Domino)
                           const usedOthers = Object.values(editingDictionary).filter(v => v && v !== editingDictionary[shortName]);
                           const availableOptions = availablePcgdNames.filter(name => !usedOthers.includes(name));
 
@@ -415,7 +500,6 @@ export const AdminDashboard: React.FC = () => {
                                         }}
                                       >
                                           <option value="">-- CHỌN LẠI TÊN (ĐANG BỊ TRÙNG) --</option>
-                                          {/* Hiển thị Option trống + Option chính chủ hiện tại */}
                                           {availableOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                                           {editingDictionary[shortName] && !availableOptions.includes(editingDictionary[shortName]) && (
                                               <option value={editingDictionary[shortName]}>{editingDictionary[shortName]}</option>
@@ -455,7 +539,6 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* --- MODAL MAPPING (HIỆN LÊN KHI ĐỌC XONG EXCEL) --- */}
       {showMappingModal && parseData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
           <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl flex flex-col max-h-full">
@@ -568,12 +651,10 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 1. UPLOAD */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
           
-          {/* 🔥 NÚT MỞ BẢNG QUẢN LÝ TỪ ĐIỂN */}
           <button 
             onClick={handleOpenDictionary}
             className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-bold transition-colors"
@@ -613,7 +694,6 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. QUẢN LÝ PHIÊN BẢN */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center"><Save className="mr-2 text-amber-500" /> Số tuần dạy thực tế</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -636,20 +716,78 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. XUẤT BÁO CÁO */}
+      {/* ===================================================================== */}
+      {/* 3. KHU VỰC KHAI BÁO & XUẤT BÁO CÁO MẪU 1 CHUYÊN NGHIỆP */}
+      {/* ===================================================================== */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-200">
-        <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-6"><BarChart3 className="mr-2 text-emerald-600" /> Báo cáo Chế độ Khuyết tật</h3>
-        <div className="flex flex-wrap gap-2 mb-8 max-h-48 overflow-y-auto p-4 bg-gray-50 rounded-xl border border-gray-100">
-          {allClassNames.map(lop => (
-            <button key={lop} onClick={() => setSelectedKTLops(prev => prev.includes(lop) ? prev.filter(l => l !== lop) : [...prev, lop])}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedKTLops.includes(lop) ? 'bg-emerald-600 text-white border-emerald-600 shadow-md transform scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400 hover:text-emerald-700'}`}>
-              {lop.replace(/\./g, '/')}
-            </button>
-          ))}
-          {allClassNames.length === 0 && <p className="text-gray-400 italic text-sm">Vui lòng tải TKB lên để hiển thị danh sách lớp.</p>}
+        <h3 className="text-xl font-bold text-emerald-800 flex items-center mb-2">
+          <BarChart3 className="mr-2 text-emerald-600" /> Xuất Bảng Kê Khai Chế Độ Khuyết Tật (Mẫu 1)
+        </h3>
+        <p className="text-sm text-gray-500 mb-6">Thêm danh sách các lớp có học sinh khuyết tật hòa nhập để hệ thống tự động bóc tách công thức theo từng TKB.</p>
+
+        {/* Form Khai Báo */}
+        <div className="flex flex-col md:flex-row gap-3 mb-6 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+          <select 
+            className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-bold text-gray-700 outline-none focus:border-emerald-500"
+            value={selectedKTClass}
+            onChange={(e) => setSelectedKTClass(e.target.value)}
+          >
+            <option value="">-- Chọn Lớp --</option>
+            {allClassNames.filter(c => !ktStudents[c]).map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          
+          <input 
+            type="text" 
+            placeholder="Họ và tên học sinh khuyết tật..." 
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:border-emerald-500"
+            value={ktStudentName}
+            onChange={(e) => setKtStudentName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddKTClass()}
+          />
+          
+          <button 
+            onClick={handleAddKTClass}
+            disabled={!selectedKTClass || !ktStudentName.trim()}
+            className="bg-emerald-600 text-white px-5 py-2 rounded-lg font-bold flex items-center shadow-sm disabled:bg-gray-300 hover:bg-emerald-700 transition-colors"
+          >
+            <PlusCircle className="w-5 h-5 mr-2" /> Thêm Lớp
+          </button>
         </div>
-        <button onClick={exportIntegratedReport} disabled={selectedKTLops.length === 0 || versions.every(v => v.weeks === 0)} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg transition-colors">
-          <FileSpreadsheet className="inline mr-2 h-6 w-6" /> TẢI FILE BÁO CÁO CỐ ĐỊNH (TỰ NHẬN DIỆN GVCN)
+
+        {/* Danh sách Lớp Khuyết tật đã Khai Báo */}
+        <div className="mb-8">
+          <h4 className="text-sm font-bold text-gray-700 mb-3 border-b pb-2">Danh sách đã thêm ({Object.keys(ktStudents).length})</h4>
+          {Object.keys(ktStudents).length === 0 ? (
+            <p className="text-sm text-gray-400 italic text-center py-6 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+              Chưa có lớp nào được thêm. Vui lòng chọn lớp và điền tên học sinh ở trên.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {Object.entries(ktStudents).map(([className, studentName]) => (
+                <div key={className} className="flex justify-between items-center bg-white border border-emerald-200 p-3 rounded-xl shadow-sm">
+                  <div>
+                    <div className="font-bold text-emerald-800 text-sm">Lớp {className.replace(/\./g, '/')}</div>
+                    <div className="text-xs text-gray-500">{studentName}</div>
+                  </div>
+                  <button 
+                    onClick={() => handleRemoveKTClass(className)}
+                    className="text-gray-400 hover:text-red-500 bg-gray-50 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Nút Xuất Excel Mẫu 1 */}
+        <button 
+          onClick={exportIntegratedReport} 
+          disabled={Object.keys(ktStudents).length === 0 || versions.every(v => v.weeks === 0)} 
+          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg transition-colors flex items-center justify-center"
+        >
+          <FileSpreadsheet className="mr-3 h-6 w-6" /> TẢI BẢNG KÊ KHAI CÁ NHÂN (MẪU 1)
         </button>
       </div>
     </div>

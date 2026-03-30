@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule } from '../types';
 import { scheduleService } from '../services/scheduleService';
-import { Search, Calendar, Layers, UserCheck } from 'lucide-react';
+import { Search, Calendar, Layers, UserCheck, Filter } from 'lucide-react';
 
 export const ClassView: React.FC = () => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [searchClass, setSearchClass] = useState('');
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
-  const [filterSession, setFilterSession] = useState('');
+  
+  // 🔥 Đổi state lọc Sáng/Chiều thành lọc Khối
+  const [filterGrade, setFilterGrade] = useState<string>('');
 
-  // STATES CHO ĐA PHIÊN BẢN
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
 
@@ -42,18 +43,36 @@ export const ClassView: React.FC = () => {
     return Array.from(classSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
   }, [currentSchedules]);
 
-  const filteredClasses = classes.filter(c => 
-    c.toLowerCase().includes(searchClass.toLowerCase())
-  );
+  // Lọc theo thanh tìm kiếm và theo Khối
+  const filteredClasses = classes.filter(c => {
+    const matchSearch = c.toLowerCase().includes(searchClass.toLowerCase());
+    const matchGrade = filterGrade ? c.startsWith(filterGrade + '.') || c.startsWith(filterGrade + '/') : true;
+    return matchSearch && matchGrade;
+  });
+
+  // Thuật toán gom nhóm Lớp theo Khối để render
+  const groupedClasses = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    filteredClasses.forEach(c => {
+      const grade = c.split(/[./]/)[0]; // Lấy số đầu tiên làm tên khối (VD: "6.11" -> "6")
+      const groupName = `Khối ${grade}`;
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(c);
+    });
+    
+    // Sắp xếp tên khối (Khối 6 -> Khối 9)
+    return Object.keys(groups).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true })).map(key => ({
+      grade: key,
+      classes: groups[key]
+    }));
+  }, [filteredClasses]);
 
   const getScheduleForClass = (className: string) => {
     return currentSchedules.filter(s => 
-      s.lop.split(', ').map(c => c.trim()).includes(className) && 
-      (filterSession ? s.buoi === filterSession : true)
+      s.lop.split(', ').map(c => c.trim()).includes(className)
     );
   };
 
-  // 🔥 THUẬT TOÁN DÒ TÌM GIÁO VIÊN CHỦ NHIỆM TỰ ĐỘNG
   const getHomeroomTeacher = (classSchedules: Schedule[]): string => {
     for (const s of classSchedules) {
       const mon = (s.mon || '').toUpperCase();
@@ -67,10 +86,8 @@ export const ClassView: React.FC = () => {
 
   const renderScheduleGrid = (classSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
-    let periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-    if (filterSession === 'Sáng') periods = [1, 2, 3, 4, 5];
-    else if (filterSession === 'Chiều') periods = [6, 7, 8, 9, 10];
+    // Hiển thị cả 10 tiết vì học cả ngày
+    const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
     return (
       <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-gray-200">
@@ -85,9 +102,8 @@ export const ClassView: React.FC = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {periods.map(period => (
-              <tr key={period} className={period === 5 && filterSession === '' ? 'border-b-4 border-gray-300' : ''}>
+              <tr key={period} className={period === 5 ? 'border-b-4 border-gray-300' : ''}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50">
-                  {/* 🔥 ĐÃ SỬA LẠI ĐÁNH SỐ TIẾT TỪ 6-10 THÀNH 1-5 CHO BUỔI CHIỀU */}
                   Tiết {period <= 5 ? period : period - 5} {period <= 5 ? '(Sáng)' : '(Chiều)'}
                 </td>
                 {days.map(day => {
@@ -142,43 +158,63 @@ export const ClassView: React.FC = () => {
           </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
             <input
               type="text"
               placeholder="Tìm tên lớp (VD: 6/11)..."
-              className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-sm font-medium"
+              className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-sm font-medium shadow-sm"
               value={searchClass}
               onChange={(e) => setSearchClass(e.target.value)}
             />
           </div>
 
-          <select
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-gray-700"
-            value={filterSession}
-            onChange={(e) => setFilterSession(e.target.value)}
-          >
-            <option value="">Cả ngày (Sáng & Chiều)</option>
-            <option value="Sáng">Chỉ hiện Buổi Sáng</option>
-            <option value="Chiều">Chỉ hiện Buổi Chiều</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <Filter className="text-gray-400 w-5 h-5 ml-2 hidden md:block" />
+            <select
+              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-sm font-bold text-gray-700 shadow-sm"
+              value={filterGrade}
+              onChange={(e) => setFilterGrade(e.target.value)}
+            >
+              <option value="">Hiển thị Tất cả các Khối</option>
+              <option value="6">Chỉ xem Khối 6</option>
+              <option value="7">Chỉ xem Khối 7</option>
+              <option value="8">Chỉ xem Khối 8</option>
+              <option value="9">Chỉ xem Khối 9</option>
+            </select>
+          </div>
         </div>
 
+        {/* 🔥 DANH SÁCH LỚP ĐƯỢC NHÓM THEO KHỐI RẤT CHUYÊN NGHIỆP */}
         {!selectedClass && (
-          <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-3">
-            {filteredClasses.map(className => (
-              <button
-                key={className}
-                onClick={() => setSelectedClass(className)}
-                className="p-3 text-sm font-bold text-emerald-900 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-emerald-50 hover:border-emerald-400 hover:shadow-md transition-all text-center"
-              >
-                {String(className).replace(/\./g, '/')}
-              </button>
+          <div className="space-y-8 animate-in fade-in duration-300">
+            {groupedClasses.map(group => (
+              <div key={group.grade} className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+                <div className="flex items-center mb-4 border-b border-gray-200 pb-2">
+                  <h3 className="text-lg font-black text-gray-700">{group.grade}</h3>
+                  <span className="ml-3 px-2.5 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">
+                    {group.classes.length} lớp
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                  {group.classes.map(className => (
+                    <button
+                      key={className}
+                      onClick={() => setSelectedClass(className)}
+                      className="p-3 text-sm font-bold text-emerald-900 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-emerald-50 hover:border-emerald-400 hover:shadow-md hover:-translate-y-0.5 transition-all text-center"
+                    >
+                      {String(className).replace(/\./g, '/')}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
-            {filteredClasses.length === 0 && (
-              <div className="col-span-full text-center py-12 text-gray-400 italic bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                Không có dữ liệu lớp học cho phiên bản này. Vui lòng tải file Excel lên.
+
+            {groupedClasses.length === 0 && (
+              <div className="text-center py-12 text-gray-400 italic bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                Không tìm thấy dữ liệu lớp học nào khớp với tìm kiếm của bạn.
               </div>
             )}
           </div>

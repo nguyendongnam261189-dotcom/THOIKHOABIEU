@@ -4,7 +4,9 @@ import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx'; // Vẫn giữ để đọc file Upload
+import ExcelJS from 'exceljs'; // 🔥 VŨ KHÍ MỚI ĐỂ VẼ MẪU 1
+import { saveAs } from 'file-saver'; // Dùng để tải file ExcelJS xuống
 
 const DEPARTMENTS = ['Toán - Tin', 'Văn - GDCD', 'Sử - Địa', 'KHTN và Công nghệ', 'Ngoại ngữ', 'Nghệ thuật - Thể chất', 'Chung'];
 
@@ -34,7 +36,7 @@ export const AdminDashboard: React.FC = () => {
   const [dictionaryAliases, setDictionaryAliases] = useState<Record<string, string>>({});
   const [editingDictionary, setEditingDictionary] = useState<Record<string, string>>({});
   
-  // 🔥 STATE CHO BÁO CÁO KHUYẾT TẬT
+  // STATE CHO BÁO CÁO KHUYẾT TẬT
   const [ktStudents, setKtStudents] = useState<Record<string, string>>({});
   const [selectedKTClass, setSelectedKTClass] = useState<string>('');
   const [ktStudentName, setKtStudentName] = useState<string>('');
@@ -320,9 +322,6 @@ export const AdminDashboard: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
-  // =====================================================================
-  // 🔥 XỬ LÝ KHAI BÁO & XUẤT EXCEL CHẾ ĐỘ KHUYẾT TẬT THEO MẪU 1
-  // =====================================================================
   const handleAddKTClass = () => {
     if (selectedKTClass && ktStudentName.trim()) {
       setKtStudents(prev => ({ ...prev, [selectedKTClass]: ktStudentName.trim() }));
@@ -337,15 +336,26 @@ export const AdminDashboard: React.FC = () => {
     setKtStudents(newKt);
   };
 
-  const exportIntegratedReport = () => {
+
+  // =====================================================================
+  // 🔥 THUẬT TOÁN XUẤT EXCEL CHUẨN MẪU 1 VỚI EXCELJS
+  // =====================================================================
+  const exportIntegratedReport = async () => {
+    setLoading(true);
     try {
-      const wb = XLSX.utils.book_new();
+      const wb = new ExcelJS.Workbook();
       const depts = Array.from(new Set(teachers.map(t => t.group || 'Chung'))).sort();
       let hasData = false;
 
-      depts.forEach(dept => {
+      // Lấy thời gian hiện tại cho phần ngày ký
+      const today = new Date();
+      const dateString = `Hòa Khánh, ngày ${today.getDate().toString().padStart(2, '0')} tháng ${String(today.getMonth() + 1).padStart(2, '0')} năm ${today.getFullYear()}`;
+
+      for (const dept of depts) {
         const deptTeachers = teachers.filter(t => (t.group || 'Chung') === dept);
-        const wsData: any[][] = [];
+        
+        // Khởi tạo mảng lưu dữ liệu của các giáo viên có dạy lớp KT
+        const teachersDataToPrint: any[] = [];
 
         deptTeachers.forEach(teacher => {
           const teacherRecords: any[] = [];
@@ -355,7 +365,7 @@ export const AdminDashboard: React.FC = () => {
           Object.entries(ktStudents).forEach(([className, studentName]) => {
             const subjects = new Set<string>();
             
-            // Tìm tất cả các môn giáo viên này dạy ở lớp KT
+            // Tìm các môn giáo viên dạy ở lớp này
             allSchedules.forEach(s => {
               if (s.giao_vien === teacher.name && s.lop.split(',').map(c => c.trim()).includes(className)) {
                 subjects.add(isHDTNType(s.mon) ? 'HĐTN' : s.mon);
@@ -367,7 +377,6 @@ export const AdminDashboard: React.FC = () => {
               let totalW = 0;
               let totalP = 0;
 
-              // Quét qua toàn bộ TKB để tính số tiết / tuần
               versions.forEach(v => {
                 if (v.weeks <= 0) return;
                 let count = 0;
@@ -375,7 +384,7 @@ export const AdminDashboard: React.FC = () => {
 
                 if (subject === 'HĐTN') {
                   const hasHDTN = vSchedules.some(s => isHDTNType(s.mon));
-                  if (hasHDTN) count = 3; // Mặc định HĐTN/GVCN tính 3 tiết
+                  if (hasHDTN) count = 3; 
                 } else {
                   count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === subject).length;
                 }
@@ -391,11 +400,10 @@ export const AdminDashboard: React.FC = () => {
                 teacherTotal += totalP;
                 teacherSubjects.add(subject);
                 
-                // Thuật toán kiểm tra số tiết có bị thay đổi giữa các TKB không
                 const isConstant = parts.every(pt => pt.p === parts[0].p);
                 let formula = '';
                 if (isConstant) {
-                  formula = `${subject}: ${parts[0].p}(tiết/tuần) x ${totalW} = ${totalP} tiết`;
+                  formula = `${subject}: ${parts[0].p} (tiết/tuần) x ${totalW} = ${totalP} tiết`;
                 } else {
                   formula = `${subject}: ${parts.map(pt => `[${pt.p}t x ${pt.w} tuần]`).join(' + ')} = ${totalP} tiết`;
                 }
@@ -404,47 +412,203 @@ export const AdminDashboard: React.FC = () => {
             });
           });
 
-          // Tạo Bảng biểu Mẫu 1 cho Giáo viên
           if (teacherRecords.length > 0) {
-            hasData = true;
-            wsData.push(['Đơn vị: .......................................', '', '', 'Mẫu 1']);
-            wsData.push(['', 'BẢNG KÊ KHAI', '', '']);
-            wsData.push(['', 'SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT', '', '']);
-            wsData.push(['', '(HỌC KÌ ... - NĂM HỌC 2024-2025)', '', '']);
-            wsData.push([`Giáo viên giảng dạy: ${teacher.name.toUpperCase()}`, '', '', '']);
-            wsData.push([`Bộ môn: ${Array.from(teacherSubjects).join(', ').toUpperCase()}`, '', '', '']);
-            wsData.push(['Stt', 'Lớp có người khuyết tật ghi rõ\n(họ tên và lớp)', 'Tổng số giờ dạy/tiết dạy ghi rõ\n(số tiết/tuần x số tuần)', 'Ghi chú']);
+            teachersDataToPrint.push({
+              teacherName: teacher.name,
+              subjects: Array.from(teacherSubjects).join(', '),
+              records: teacherRecords,
+              total: teacherTotal
+            });
+          }
+        });
 
-            teacherRecords.forEach((rec, idx) => {
-              wsData.push([
+        // 🟢 VẼ SHEET EXCEL NẾU TỔ CÓ DỮ LIỆU
+        if (teachersDataToPrint.length > 0) {
+          hasData = true;
+          const ws = wb.addWorksheet(`Tổ ${dept.substring(0, 25)}`);
+          
+          // Chỉnh độ rộng cột chuẩn Mẫu 1
+          ws.columns = [
+            { width: 6 },   // A: STT
+            { width: 35 },  // B: Lớp & Học sinh
+            { width: 45 },  // C: Tổng số giờ
+            { width: 15 }   // D: Ghi chú
+          ];
+
+          let r = 1; // Row pointer
+
+          teachersDataToPrint.forEach((tData) => {
+            // Header: Đơn vị / Mẫu 1
+            ws.getCell(`A${r}`).value = 'Đơn vị: Trường THCS Nguyễn Bỉnh Khiêm';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`D${r}`).value = 'Mẫu 1';
+            ws.getCell(`D${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
+            r++;
+
+            // Header: BẢNG KÊ KHAI
+            ws.mergeCells(`A${r}:D${r}`);
+            ws.getCell(`A${r}`).value = 'BẢNG KÊ KHAI';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 14, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+            r++;
+
+            ws.mergeCells(`A${r}:D${r}`);
+            ws.getCell(`A${r}`).value = 'SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 13, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+            r++;
+
+            ws.mergeCells(`A${r}:D${r}`);
+            ws.getCell(`A${r}`).value = '(HỌC KÌ 1- NH 2024-2025)';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+            r += 2;
+
+            // Thông tin GV & Bộ môn
+            ws.mergeCells(`A${r}:D${r}`);
+            ws.getCell(`A${r}`).value = {
+              richText: [
+                { font: { bold: true, name: 'Times New Roman', size: 12 }, text: 'Giáo viên giảng dạy: ' },
+                { font: { name: 'Times New Roman', size: 12 }, text: tData.teacherName.toUpperCase() }
+              ]
+            };
+            r++;
+
+            ws.mergeCells(`A${r}:D${r}`);
+            ws.getCell(`A${r}`).value = {
+              richText: [
+                { font: { bold: true, name: 'Times New Roman', size: 12 }, text: 'Bộ môn: ' },
+                { font: { name: 'Times New Roman', size: 12 }, text: tData.subjects.toUpperCase() }
+              ]
+            };
+            r++;
+
+            // Vẽ tiêu đề bảng (Table Header)
+            const headerRow = ws.getRow(r);
+            headerRow.values = [
+              'Stt', 
+              'Lớp có người khuyết tật ghi rõ\n(họ tên và lớp)', 
+              'Tổng số giờ dạy/tiết dạy ghi rõ\n(số tiết/tuần x số tuần)', 
+              'Ghi chú'
+            ];
+            headerRow.height = 40;
+            for(let i=1; i<=4; i++) {
+              const cell = headerRow.getCell(i);
+              cell.font = { name: 'Times New Roman', size: 12, bold: true };
+              cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            }
+            r++;
+
+            // Đổ dữ liệu các môn dạy (Table Body)
+            tData.records.forEach((rec: any, idx: number) => {
+              const row = ws.getRow(r);
+              row.values = [
                 idx + 1,
                 `${rec.studentName}\nLớp ${rec.className.replace(/\./g, '/')}`,
                 rec.formula,
                 ''
-              ]);
+              ];
+              row.height = 35;
+              row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+              row.getCell(2).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+              row.getCell(3).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+              row.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
+
+              for(let i=1; i<=4; i++) {
+                const cell = row.getCell(i);
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.font = { name: 'Times New Roman', size: 12, bold: (i===2 || i===3) };
+              }
+              r++;
             });
 
-            wsData.push(['', 'Tổng cộng', `${teacherTotal} tiết`, '']);
-            wsData.push(['', '', '', '']); // Dòng trống cách biệt giữa các giáo viên
-            wsData.push(['', '', '', '']);
-          }
-        });
+            // Vẽ dòng Tổng cộng
+            ws.mergeCells(`A${r}:B${r}`);
+            ws.getCell(`A${r}`).value = 'Tổng cộng';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
+            ws.getCell(`A${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            ws.getCell(`B${r}`).border = { top: {style:'thin'}, bottom: {style:'thin'} };
 
-        // Tạo Sheet cho Tổ
-        if (wsData.length > 0) {
-          const ws = XLSX.utils.aoa_to_sheet(wsData);
-          ws['!cols'] = [{ wch: 8 }, { wch: 40 }, { wch: 50 }, { wch: 15 }];
-          XLSX.utils.book_append_sheet(wb, ws, `Tổ ${dept.substring(0, 20)}`);
+            ws.getCell(`C${r}`).value = `${tData.total} tiết`;
+            ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`C${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
+            ws.getCell(`C${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            
+            ws.getCell(`D${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            r += 2;
+
+            // Khu vực Chữ ký
+            ws.mergeCells(`C${r}:D${r}`);
+            ws.getCell(`C${r}`).value = dateString;
+            ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, italic: true };
+            ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
+            r++;
+
+            ws.mergeCells(`C${r}:D${r}`);
+            ws.getCell(`C${r}`).value = 'Người kê khai';
+            ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
+            r++;
+
+            ws.mergeCells(`C${r}:D${r}`);
+            ws.getCell(`C${r}`).value = tData.teacherName;
+            ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
+            r += 2;
+
+            ws.mergeCells(`A${r}:B${r}`);
+            ws.getCell(`A${r}`).value = 'Xác nhận của Tổ trưởng chuyên môn';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+            r += 4;
+
+            ws.mergeCells(`A${r}:B${r}`);
+            ws.getCell(`A${r}`).value = 'Xác nhận Phó Hiệu trưởng';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+            
+            ws.mergeCells(`C${r}:D${r}`);
+            ws.getCell(`C${r}`).value = 'Xác nhận của Hiệu trưởng';
+            ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
+            r += 5;
+
+            ws.mergeCells(`A${r}:B${r}`);
+            ws.getCell(`A${r}`).value = 'Nguyễn Thị Quyết';
+            ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+
+            ws.mergeCells(`C${r}:D${r}`);
+            ws.getCell(`C${r}`).value = 'Bùi Duy Quốc';
+            ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+            ws.getCell(`C${r}`).alignment = { horizontal: 'center' };
+
+            // Cắt trang để giáo viên tiếp theo nhảy sang trang in mới (tùy chọn)
+            r += 4; 
+          });
         }
-      });
+      }
 
       if (!hasData) {
         alert("Không có dữ liệu tiết dạy nào khớp với danh sách lớp khuyết tật bạn vừa khai báo.");
+        setLoading(false);
         return;
       }
 
-      XLSX.writeFile(wb, `Bao_Cao_Che_Do_Khuyet_Tat_Mau_1.xlsx`);
-    } catch (err) { alert("Lỗi xuất file."); console.error(err); }
+      // Lưu file Excel
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Bao_Cao_Che_Do_Khuyet_Tat_Mau_1.xlsx`);
+
+    } catch (err) { 
+      alert("Lỗi xuất file. Vui lòng kiểm tra lại."); 
+      console.error(err); 
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -787,7 +951,8 @@ export const AdminDashboard: React.FC = () => {
           disabled={Object.keys(ktStudents).length === 0 || versions.every(v => v.weeks === 0)} 
           className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-xl font-bold shadow-lg text-lg transition-colors flex items-center justify-center"
         >
-          <FileSpreadsheet className="mr-3 h-6 w-6" /> TẢI BẢNG KÊ KHAI CÁ NHÂN (MẪU 1)
+          {loading ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <FileSpreadsheet className="mr-3 h-6 w-6" />}
+          {loading ? 'ĐANG XỬ LÝ DỮ LIỆU EXCEL...' : 'TẢI BẢNG KÊ KHAI CÁ NHÂN (MẪU 1)'}
         </button>
       </div>
     </div>

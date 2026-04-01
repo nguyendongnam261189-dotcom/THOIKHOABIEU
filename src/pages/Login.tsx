@@ -12,6 +12,11 @@ export const Login: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     try {
+      // 🔥 ÉP GOOGLE LUÔN HIỆN BẢNG CHỌN TÀI KHOẢN (Fix lỗi kẹt tài khoản cũ trên điện thoại)
+      googleProvider.setCustomParameters({
+        prompt: 'select_account'
+      });
+
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 
@@ -32,7 +37,7 @@ export const Login: React.FC = () => {
           role: role,
           status: status
         });
-      } else if (user.email === 'nguyendongnam261189@gmail.com' && userDoc.data().role !== 'admin') {
+      } else if (user.email === 'nguyendongnam261189@gmail.com' && userDoc.data()?.role !== 'admin') {
         // Upgrade existing owner account to admin
         await setDoc(userDocRef, { role: 'admin', status: 'approved' }, { merge: true });
       }

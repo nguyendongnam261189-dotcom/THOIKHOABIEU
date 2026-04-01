@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -149,8 +149,7 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 🛡️ CHẶN TRUY CẬP NẾU ĐANG BẢO TRÌ (Chỉ Admin mới có thể lách qua nếu thầy muốn code thêm, 
-  // nhưng hiện tại tôi sẽ chặn toàn bộ để bảo vệ Quota của thầy)
+  // 🛡️ CHẶN TRUY CẬP NẾU ĐANG BẢO TRÌ 
   if (IS_MAINTENANCE && !loading) {
     return <MaintenancePage />;
   }
@@ -193,9 +192,10 @@ const App: React.FC = () => {
               element={role === 'admin' ? <UserManagement /> : <Navigate to="/" />} 
             />
 
+            {/* 🔥 ĐÃ MỞ KHÓA TRANG THỐNG KÊ (DASHBOARD) CHO GIÁO VIÊN */}
             <Route 
               path="dashboard" 
-              element={(role === 'admin' || role === 'manager' || role === 'ttcm') ? <Dashboard role={role} department={department} /> : <Navigate to="/" />} 
+              element={(role === 'admin' || role === 'manager' || role === 'ttcm' || role === 'teacher') ? <Dashboard role={role} department={department} /> : <Navigate to="/" />} 
             />
 
             <Route 

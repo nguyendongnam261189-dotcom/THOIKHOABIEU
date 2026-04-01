@@ -139,6 +139,9 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     if (changed) setAssignments(newAssignments);
   };
 
+  // =====================================================================
+  // 🔥 THUẬT TOÁN ĐỀ XUẤT GIÁO VIÊN DẠY THAY (MỚI: CÓ NHÃN TAGS)
+  // =====================================================================
   const getSuggestions = (slot: ActiveSlot) => {
     const absentTeacher = teachers.find(t => t.name === slot.absentTeacher);
     if (!absentTeacher) return [];
@@ -150,14 +153,16 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       if (t.group !== group) return false; 
       if (role === 'ttcm' && department && t.group !== department) return false;
 
+      // Lọc cứng: Phải rảnh tiết này
       const isBusy = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period && s.buoi === slot.session);
       return !isBusy;
     });
 
     const scored = availableTeachers.map(t => {
       let score = 0;
-      let reasons: string[] = [];
+      const tags: { text: string, color: string }[] = [];
 
+      // 1. Chuyên môn (+60)
       const normalizedSlotSubject = normalizeSubjectName(slot.subject);
       const teacherSubjects = t.teachableSubjects?.map(s => normalizeSubjectName(s)) || [];
       let canTeachSubject = teacherSubjects.includes(normalizedSlotSubject);
@@ -167,43 +172,50 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
           canTeachSubject = true;
         }
       }
+      if (!canTeachSubject && t.subject) {
+        canTeachSubject = t.subject.toLowerCase().includes(slot.subject.toLowerCase());
+      }
 
       if (canTeachSubject) {
-        score += 1000; 
-        reasons.push('Dạy đúng môn');
+        score += 60; 
+        tags.push({ text: `Đúng môn ${slot.subject}`, color: 'bg-blue-100 text-blue-800 border-blue-200' });
       } else {
-        reasons.push('Dạy trái môn');
+        tags.push({ text: 'Trái môn', color: 'bg-gray-100 text-gray-500 border-gray-200' });
       }
 
-      const classesToday = schedules.filter(s => s.giao_vien === t.name && s.thu === slot.day).length;
+      // 2. Có mặt tại trường buổi đó (+30)
       const classesThisSession = schedules.filter(s => s.giao_vien === t.name && s.thu === slot.day && s.buoi === slot.session).length;
-
-      if (classesToday === 0) {
-        score -= 500;
-        reasons.push('Ngày nghỉ');
-      } else if (classesThisSession === 0) {
-        score -= 300;
-        reasons.push('Nghỉ buổi này');
-      } else {
-        score += 100;
-        reasons.push('Đang dạy buổi này');
+      if (classesThisSession > 0) {
+        score += 30;
+        tags.push({ text: 'Đang ở trường', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' });
       }
 
+      // 3. Tiết liền kề (+20)
       const hasAdjacentBefore = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period - 1 && s.buoi === slot.session);
       const hasAdjacentAfter = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period + 1 && s.buoi === slot.session);
       
       if (hasAdjacentBefore || hasAdjacentAfter) {
-        score += 50;
-        reasons.push('Có tiết liền kề');
+        score += 20;
+        tags.push({ text: 'Có tiết liền kề', color: 'bg-amber-100 text-amber-800 border-amber-200' });
       }
 
-      score += (10 - classesToday) * 2;
-      reasons.push(`Tổng ${classesToday} tiết/ngày`);
+      // 4. Trừ điểm tải tiết (-1 điểm/tiết)
+      const totalClassesWeek = schedules.filter(s => s.giao_vien === t.name).length;
+      score -= totalClassesWeek;
 
-      return { teacher: t, score, reason: reasons.join(', '), classesToday };
+      if (totalClassesWeek < 12) {
+        tags.push({ text: `Tải nhẹ (${totalClassesWeek}t)`, color: 'bg-purple-100 text-purple-800 border-purple-200' });
+      } else {
+        tags.push({ text: `Đang dạy (${totalClassesWeek}t)`, color: 'bg-gray-50 text-gray-600 border-gray-200' });
+      }
+
+      const breakdown = `${canTeachSubject ? '60' : '0'} (Môn) + ${classesThisSession > 0 ? '30' : '0'} (Có mặt) + ${hasAdjacentBefore || hasAdjacentAfter ? '20' : '0'} (Liền kề) - ${totalClassesWeek} (Tải tiết) = ${score}`;
+
+      return { teacher: t, score, tags, breakdown, totalClassesWeek };
     });
 
-    scored.sort((a, b) => b.score - a.score);
+    // Sắp xếp: Điểm cao nhất lên đầu, nếu bằng điểm thì ai ít tiết hơn lên trước
+    scored.sort((a, b) => b.score - a.score || a.totalClassesWeek - b.totalClassesWeek);
     return scored;
   };
 
@@ -329,12 +341,10 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                         <td key={day} className={cellClass}>
                           {slot ? (
                             <div className="font-medium text-[11px] leading-tight" title={`${slot.lop} (${slot.mon})`}>
-                              {/* 🔥 HIỂN THỊ LỚP: Đổi . thành / */}
                               {String(slot.lop).replace(/\./g, '/')}
                             </div>
                           ) : isTargetSlot ? (
                             <div className="font-bold text-red-600 text-[10px] leading-tight flex flex-col items-center justify-center" title={`Dạy thay lớp ${activeSlot.className}`}>
-                              {/* 🔥 HIỂN THỊ LỚP: Đổi . thành / */}
                               <span className="bg-red-100 text-red-700 px-1 rounded border border-red-200 whitespace-nowrap">
                                 {String(activeSlot.className).replace(/\./g, '/')}
                               </span>
@@ -410,7 +420,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                           }}>
                         {slot ? (
                           <div className="flex flex-col items-center text-center">
-                            {/* 🔥 HIỂN THỊ LỚP: Đổi . thành / */}
                             <span className="font-bold text-indigo-700 text-xs md:text-sm leading-tight">
                                 {String(slot.lop).replace(/\./g, '/')}
                             </span>
@@ -537,7 +546,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                          <td className="border border-gray-800 p-2 font-medium whitespace-nowrap">{a.absentTeacher}</td>
                          <td className="border border-gray-800 p-2 font-bold text-indigo-700 whitespace-nowrap">{a.substituteTeacher}</td>
                          <td className="border border-gray-800 p-2 text-center font-medium whitespace-nowrap">
-                           {/* 🔥 XUẤT ẢNH BÁO CÁO: Đổi . thành / */}
                            {String(a.className).replace(/\./g, '/')}
                          </td>
                          <td className="border border-gray-800 p-2 text-center">{a.day}</td>
@@ -613,7 +621,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-3">
-            {/* 🔥 BỘ CHỌN PHIÊN BẢN CHO DẠY THAY */}
             <div className="flex items-center bg-indigo-50 p-2 rounded-xl border border-indigo-100 shadow-sm w-full sm:w-auto">
                 <span className="text-indigo-700 font-bold text-xs mr-2 flex items-center shrink-0">
                     <Layers className="w-4 h-4 mr-1" /> Bản:
@@ -623,7 +630,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                     value={selectedVersion}
                     onChange={(e) => {
                         setSelectedVersion(e.target.value);
-                        setAssignments({}); // Reset khi đổi phiên bản
+                        setAssignments({}); 
                     }}
                 >
                     {versions.map(v => <option key={v} value={v}>{v}</option>)}
@@ -674,7 +681,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
 
       {selectedAbsentTeachers.map(renderAbsentTeacherSchedule)}
 
-      {/* Modal for selecting substitute */}
       {activeSlot && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-0 md:p-4">
           <div className="bg-white md:rounded-2xl shadow-2xl w-full max-w-6xl h-full md:h-auto md:max-h-[90vh] flex flex-col overflow-hidden">
@@ -745,24 +751,36 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                         onMouseLeave={() => setHoveredSub(null)}
                       >
                         <div 
-                          className={`p-3 md:p-4 flex justify-between items-center cursor-pointer ${selectedSub === s.teacher.name ? 'bg-indigo-50/30' : 'bg-white'}`}
+                          className={`p-3 md:p-4 flex flex-col cursor-pointer ${selectedSub === s.teacher.name ? 'bg-indigo-50/30' : 'bg-white'}`}
                           onClick={() => setSelectedSub(selectedSub === s.teacher.name ? null : s.teacher.name)}
                         >
-                          <div className="flex items-center">
-                            <div className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center text-sm font-bold mr-3 shrink-0 ${index === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                              {index + 1}
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center">
+                              <div className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center text-sm font-bold mr-3 shrink-0 ${index === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                {index + 1}
+                              </div>
+                              <div>
+                                <p className="font-bold text-gray-800 text-sm md:text-base">{s.teacher.name}</p>
+                                <p className="text-[11px] md:text-xs text-gray-500 line-clamp-1">{s.teacher.subject} - {s.teacher.group}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-bold text-gray-800 text-sm md:text-base">{s.teacher.name}</p>
-                              <p className="text-[11px] md:text-xs text-gray-500 line-clamp-1">{s.teacher.subject} - {s.teacher.group}</p>
+                            <div className="text-right shrink-0 ml-2">
+                              <p className="text-[10px] md:text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 inline-block mb-1 shadow-sm">
+                                Điểm AI: {s.score}
+                              </p>
+                              <p className="text-[10px] text-gray-400 mt-1 cursor-help" title={s.breakdown}>Xem chi tiết điểm</p>
                             </div>
                           </div>
-                          <div className="text-right shrink-0 ml-2">
-                            <p className="text-[10px] md:text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-1 rounded inline-block mb-1">
-                              Điểm: {s.score}
-                            </p>
-                            <p className="text-[10px] md:text-xs text-gray-500">{s.reason.split(',')[0]}</p>
+                          
+                          {/* 🔥 HIỂN THỊ CÁC NHÃN (TAGS) TỪ THUẬT TOÁN MỚI */}
+                          <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100/50">
+                            {s.tags.map((tag, idx) => (
+                              <span key={idx} className={`text-[10px] md:text-xs font-bold px-2 py-1 rounded border ${tag.color}`}>
+                                {tag.text}
+                              </span>
+                            ))}
                           </div>
+
                         </div>
                       </div>
                     ))}

@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
-// 🔥 THÊM useLocation ĐỂ NHẬN DIỆN TRANG HIỆN TẠI
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-// 🔥 THÊM Menu, X ĐỂ LÀM NÚT BẤM ĐIỆN THOẠI
 import { Calendar, Users, LogOut, Upload, Search, BarChart3, Menu, X } from 'lucide-react';
 
 export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
-  const location = useLocation(); // Lấy đường dẫn hiện tại
+  const location = useLocation(); 
   const [pendingCount, setPendingCount] = useState(0);
   
-  // 🔥 STATE ĐÓNG/MỞ MENU TRÊN ĐIỆN THOẠI
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleLogout = async () => {
@@ -35,30 +32,26 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
     return () => unsubscribe();
   }, [role]);
 
-  // HÀM KIỂM TRA XEM LINK NÀY CÓ ĐANG ĐƯỢC CHỌN KHÔNG
   const isActive = (path: string) => location.pathname === path;
 
-  // HÀM TẠO CLASS CSS CHO MENU MÁY TÍNH
   const getDesktopMenuClass = (path: string) => {
     return `flex items-center px-3 py-2 rounded-md font-medium transition-colors ${
       isActive(path) 
-        ? 'bg-indigo-900 text-white shadow-inner' // Đang chọn thì nền đậm
-        : 'text-indigo-50 hover:bg-indigo-500 hover:text-white' // Chưa chọn
+        ? 'bg-indigo-900 text-white shadow-inner' 
+        : 'text-indigo-50 hover:bg-indigo-500 hover:text-white' 
     }`;
   };
 
-  // HÀM TẠO CLASS CSS CHO MENU ĐIỆN THOẠI
   const getMobileMenuClass = (path: string) => {
     return `flex items-center w-full px-4 py-3 rounded-xl font-medium transition-colors ${
       isActive(path)
-        ? 'bg-indigo-100 text-indigo-800' // Đang chọn thì nền xanh nhạt
-        : 'text-gray-600 hover:bg-gray-100' // Chưa chọn
+        ? 'bg-indigo-100 text-indigo-800' 
+        : 'text-gray-600 hover:bg-gray-100' 
     }`;
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* KHU VỰC HEADER (THANH TRÊN CÙNG) */}
       <header className="bg-indigo-600 text-white shadow-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
@@ -72,7 +65,6 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
               <span className="font-bold text-xl tracking-tight">TKB Manager</span>
             </div>
             
-            {/* 🔥 MENU MÁY TÍNH (ẨN ĐI TRÊN ĐIỆN THOẠI) */}
             <nav className="hidden md:flex space-x-2">
               <Link to="/" className={getDesktopMenuClass('/')}>
                 <Search className="h-4 w-4 mr-2" /> TKB Giáo viên
@@ -81,8 +73,8 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
                 <Calendar className="h-4 w-4 mr-2" /> TKB Lớp
               </Link>
 
-              {/* 🔥 MỞ KHÓA MENU THỐNG KÊ CHO CẢ TTCM */}
-              {(role === 'admin' || role === 'manager' || role === 'ttcm') && (
+              {/* 🔥 ĐÃ MỞ KHÓA MENU THỐNG KÊ CHO TẤT CẢ QUYỀN (BAO GỒM TEACHER) */}
+              {(role === 'admin' || role === 'manager' || role === 'ttcm' || role === 'teacher') && (
                 <Link to="/dashboard" className={getDesktopMenuClass('/dashboard')}>
                   <BarChart3 className="h-4 w-4 mr-2" /> Thống kê
                 </Link>
@@ -116,7 +108,6 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
                 </>
               )}
               
-              {/* Nút đăng xuất làm riêng màu đỏ nhạt */}
               <button 
                 onClick={handleLogout} 
                 className="flex items-center px-3 py-2 rounded-md font-medium text-red-100 hover:bg-red-500 hover:text-white transition-colors ml-2"
@@ -125,7 +116,6 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
               </button>
             </nav>
 
-            {/* 🔥 NÚT BẤM HIỆN MENU ĐIỆN THOẠI (HAMBURGER) */}
             <div className="md:hidden flex items-center">
               <button 
                 onClick={() => setIsMobileMenuOpen(true)}
@@ -144,23 +134,17 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
         </div>
       </header>
 
-      {/* KHU VỰC NỘI DUNG CHÍNH */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-10">
         <Outlet />
       </main>
 
-      {/* =======================================================
-          🔥 MENU DỌC CHO ĐIỆN THOẠI (SIDEBAR SLIDE-IN) 
-          ======================================================= */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
-          {/* Lớp phủ đen mờ (Bấm vào để đóng) */}
           <div 
             className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
             onClick={() => setIsMobileMenuOpen(false)}
           ></div>
 
-          {/* Bảng Menu Dọc trượt từ phải sang */}
           <div className="relative ml-auto flex h-full w-[280px] max-w-xs flex-col overflow-y-auto bg-white shadow-2xl animate-in slide-in-from-right-full duration-300">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50/50">
               <span className="font-bold text-xl text-indigo-900">Tính năng</span>
@@ -180,8 +164,8 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
                 <Calendar className="h-5 w-5 mr-4" /> Tra TKB Lớp học
               </Link>
 
-              {/* 🔥 MỞ KHÓA MENU THỐNG KÊ CHO CẢ TTCM Ở MOBILE */}
-              {(role === 'admin' || role === 'manager' || role === 'ttcm') && (
+              {/* 🔥 ĐÃ MỞ KHÓA MENU THỐNG KÊ CHO TẤT CẢ QUYỀN TRÊN ĐIỆN THOẠI */}
+              {(role === 'admin' || role === 'manager' || role === 'ttcm' || role === 'teacher') && (
                 <div className="pt-4 pb-2">
                   <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Thống kê & Báo cáo</p>
                   <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/dashboard')}`}>

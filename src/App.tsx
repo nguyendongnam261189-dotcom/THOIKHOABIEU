@@ -6,7 +6,8 @@ import { auth, db } from './firebase';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { AdminDashboard } from './pages/AdminDashboard';
-import { TeacherView } from './pages/TeacherView';
+// 🔥 CẬP NHẬT: Thay thế TeacherView bằng Directory
+import { Directory } from './pages/Directory'; 
 import { ClassView } from './pages/ClassView';
 import { SubstituteTeacher } from './pages/SubstituteTeacher';
 import { TeacherManagement } from './pages/TeacherManagement';
@@ -30,7 +31,7 @@ const MaintenancePage = () => (
   <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
     <div className="bg-white p-10 rounded-3xl shadow-xl max-w-lg w-full border border-orange-100">
       <div className="relative mb-6 inline-block">
-        <HardHat className="w-20 h-20 text-orange-500 mx-auto" />
+        <HardHat className="w-20 h-20 text-orange-50 mx-auto" />
         <AlertTriangle className="w-8 h-8 text-amber-500 absolute -bottom-1 -right-1 bg-white rounded-full p-1 shadow-sm" />
       </div>
       
@@ -117,7 +118,6 @@ const App: React.FC = () => {
       if (currentUser) {
         setUser(currentUser);
         try {
-          // Chỉ gọi database nếu KHÔNG trong chế độ bảo trì để tiết kiệm Quota
           if (!IS_MAINTENANCE) {
             const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
             if (userDoc.exists()) {
@@ -149,7 +149,6 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 🛡️ CHẶN TRUY CẬP NẾU ĐANG BẢO TRÌ 
   if (IS_MAINTENANCE && !loading) {
     return <MaintenancePage />;
   }
@@ -180,7 +179,8 @@ const App: React.FC = () => {
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
           
           <Route path="/" element={user ? <Layout role={role} /> : <Navigate to="/login" />}>
-            <Route index element={<TeacherView role={role} department={department} teacherName={teacherName} />} />
+            {/* 🔥 CẬP NHẬT: Đặt Trang Danh bạ làm trang chủ mặc định (index) */}
+            <Route index element={<Directory role={role} department={department} teacherName={teacherName} />} />
             <Route path="class" element={<ClassView />} />
             
             <Route 
@@ -191,13 +191,10 @@ const App: React.FC = () => {
               path="users" 
               element={role === 'admin' ? <UserManagement /> : <Navigate to="/" />} 
             />
-
-            {/* 🔥 ĐÃ MỞ KHÓA TRANG THỐNG KÊ (DASHBOARD) CHO GIÁO VIÊN */}
             <Route 
               path="dashboard" 
               element={(role === 'admin' || role === 'manager' || role === 'ttcm' || role === 'teacher') ? <Dashboard role={role} department={department} /> : <Navigate to="/" />} 
             />
-
             <Route 
               path="substitute" 
               element={(role === 'admin' || role === 'ttcm') ? <SubstituteTeacher role={role} department={department} /> : <Navigate to="/" />} 

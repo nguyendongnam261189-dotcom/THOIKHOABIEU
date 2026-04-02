@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle, Settings, PhoneCall, Phone } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle, Settings, PhoneCall, Phone, Search } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';

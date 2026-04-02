@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Calendar, Users, LogOut, Upload, Search, BarChart3, Menu, X } from 'lucide-react';
+import { Calendar, Users, LogOut, Upload, BarChart3, Menu, X, PhoneCall } from 'lucide-react';
 
 export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
@@ -66,8 +66,9 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
             </div>
             
             <nav className="hidden md:flex space-x-2">
+              {/* 🔥 CẬP NHẬT: Đổi tên và icon thành Danh bạ */}
               <Link to="/" className={getDesktopMenuClass('/')}>
-                <Search className="h-4 w-4 mr-2" /> TKB Giáo viên
+                <PhoneCall className="h-4 w-4 mr-2" /> Danh bạ
               </Link>
               <Link to="/class" className={getDesktopMenuClass('/class')}>
                 <Calendar className="h-4 w-4 mr-2" /> TKB Lớp
@@ -157,9 +158,11 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
             </div>
 
             <div className="px-4 py-6 space-y-2">
+              {/* 🔥 CẬP NHẬT: Đổi tên và icon trên giao diện Điện thoại */}
               <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className={getMobileMenuClass('/')}>
-                <Search className="h-5 w-5 mr-4" /> Tra TKB Giáo viên
+                <PhoneCall className="h-5 w-5 mr-4" /> Danh bạ & TKB
               </Link>
+              
               <Link to="/class" onClick={() => setIsMobileMenuOpen(false)} className={getMobileMenuClass('/class')}>
                 <Calendar className="h-5 w-5 mr-4" /> Tra TKB Lớp học
               </Link>

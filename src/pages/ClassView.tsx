@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Search, Calendar, Layers, UserCheck, Filter, Star, Phone, MessageCircle, Video, X, PhoneCall } from 'lucide-react';
+import { Search, Calendar, Layers, UserCheck, Filter, Star, Phone, MessageCircle, Video, X, PhoneCall, Copy, Check, Download, Loader2, Image as ImageIcon } from 'lucide-react';
+import { toBlob } from 'html-to-image'; // 🔥 Sử dụng thư viện chuẩn từ trang Dạy Thay
 
-// 🔥 CẬP NHẬT: Thêm prop teacherName để hệ thống biết ai đang đăng nhập
 export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherName }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
-  const [teachers, setTeachers] = useState<Teacher[]>([]); // Thêm state lưu danh bạ GV
+  const [teachers, setTeachers] = useState<Teacher[]>([]); 
   
   const [searchClass, setSearchClass] = useState('');
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
@@ -16,13 +16,24 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
 
-  // 🔥 State quản lý Pop-up Liên hệ Khẩn cấp
   const [selectedSlot, setSelectedSlot] = useState<Schedule | null>(null);
+
+  // 🔥 STATES CHO TÍNH NĂNG CHỤP ẢNH
+  const tkbRef = useRef<HTMLDivElement>(null);
+  const contactsRef = useRef<HTMLDivElement>(null);
+  
+  const [isCopyingTkb, setIsCopyingTkb] = useState(false);
+  const [tkbCopySuccess, setTkbCopySuccess] = useState(false);
+  
+  const [isCopyingContacts, setIsCopyingContacts] = useState(false);
+  const [contactsCopySuccess, setContactsCopySuccess] = useState(false);
+  
+  const [previewImage, setPreviewImage] = useState<{url: string, type: 'TKB'|'DanhBa'} | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       const schedulesData = await scheduleService.getAllSchedules();
-      const teachersData = await teacherService.getAllTeachers(); // Lấy danh bạ để lấy SĐT
+      const teachersData = await teacherService.getAllTeachers(); 
       
       setAllSchedules(schedulesData);
       setTeachers(teachersData);
@@ -41,7 +52,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
   }, [allSchedules, selectedVersion]);
 
-  // 🔥 TÍNH NĂNG 1: TỰ ĐỘNG TÌM LỚP CHỦ NHIỆM
   const isHomeroomSubject = (subject: string) => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
@@ -57,7 +67,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     });
     return Array.from(hrClasses).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
   }, [currentSchedules, teacherName]);
-
 
   const classes = useMemo(() => {
     const classSet = new Set<string>();
@@ -114,12 +123,58 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     return `https://zalo.me/${cleanPhone}`;
   };
 
+  // ============================================================================
+  // 🔥 THUẬT TOÁN CHỤP & COPY ẢNH ZALO
+  // ============================================================================
+  const processImageCapture = async (ref: React.RefObject<HTMLDivElement>, type: 'TKB'|'DanhBa') => {
+    if (!ref.current) return;
+    
+    if (type === 'TKB') setIsCopyingTkb(true);
+    else setIsCopyingContacts(true);
+
+    try {
+      // Đợi DOM ổn định
+      await new Promise(resolve => setTimeout(resolve, 300)); 
+      
+      const blob = await toBlob(ref.current, {
+        backgroundColor: '#ffffff',
+        pixelRatio: 2, // Xuất ảnh nét gấp đôi để gửi Zalo không bị vỡ
+        style: { transform: 'none', margin: '0' }
+      });
+
+      if (!blob) throw new Error("Dữ liệu ảnh rỗng.");
+
+      try {
+        const item = new ClipboardItem({ 'image/png': blob });
+        await navigator.clipboard.write([item]);
+        
+        if (type === 'TKB') { 
+          setTkbCopySuccess(true); 
+          setTimeout(() => setTkbCopySuccess(false), 3000); 
+        } else { 
+          setContactsCopySuccess(true); 
+          setTimeout(() => setContactsCopySuccess(false), 3000); 
+        }
+      } catch (clipErr) {
+        console.warn('Clipboard bị chặn, mở ảnh xem trước...', clipErr);
+        const url = URL.createObjectURL(blob);
+        setPreviewImage({ url, type });
+      }
+    } catch (err: any) {
+      alert(`Lỗi tạo ảnh: ${err.message}. Vui lòng tải lại trang và thử lại.`);
+    } finally {
+      if (type === 'TKB') setIsCopyingTkb(false);
+      else setIsCopyingContacts(false);
+    }
+  };
+
+
   const renderScheduleGrid = (classSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
     const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
     return (
-      <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-emerald-200">
+      <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-emerald-50/50">
             <tr>
@@ -142,7 +197,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                   const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
                   const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
                   
-                  // 🔥 TÍNH NĂNG 2: THIẾT LẬP Ô LỊCH THÀNH NÚT BẤM INTERACTIVE
                   const isClickable = slot && slot.giao_vien !== 'Chưa rõ';
 
                   return (
@@ -175,11 +229,9 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     );
   };
 
-  // 🔥 RENDER MODAL LIÊN HỆ KHẨN CẤP
   const renderContactModal = () => {
     if (!selectedSlot) return null;
     
-    // Tìm thông tin giáo viên từ danh bạ
     const teacherInfo = teachers.find(t => t.name === selectedSlot.giao_vien);
     const phone = teacherInfo?.phone;
 
@@ -238,9 +290,69 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     );
   };
 
+  // 🔥 TEMPLATE ẨN ĐỂ CHỤP ẢNH DANH BẠ
+  const renderHiddenContactsTemplate = () => {
+    if (!selectedClass) return null;
+    const classScheds = getScheduleForClass(selectedClass);
+    const uniqueTeacherNames = Array.from(new Set(classScheds.map(s => s.giao_vien).filter(n => n !== 'Chưa rõ'))).sort();
+
+    return (
+      <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+        <div ref={contactsRef} className="bg-white p-8 w-[900px] border border-gray-200" style={{ fontFamily: "'Inter', sans-serif" }}>
+          
+          <div className="text-center mb-8 border-b-2 border-emerald-600 pb-6">
+            <h2 className="text-3xl font-black text-emerald-900 mb-2 uppercase">DANH BẠ GIÁO VIÊN BỘ MÔN</h2>
+            <div className="inline-flex items-center justify-center bg-emerald-100 px-6 py-2 rounded-full border border-emerald-300">
+              <h3 className="text-2xl font-bold text-emerald-800 tracking-wider">
+                LỚP {String(selectedClass).replace(/\./g, '/')}
+              </h3>
+            </div>
+            <p className="text-gray-500 mt-4 font-medium text-lg">Áp dụng từ phiên bản: {selectedVersion}</p>
+          </div>
+          
+          <table className="w-full border-collapse border border-gray-300">
+            <thead>
+              <tr className="bg-emerald-700 text-white">
+                <th className="border border-emerald-800 p-4 text-center w-16 text-lg">STT</th>
+                <th className="border border-emerald-800 p-4 text-left font-bold text-lg w-1/4">MÔN DẠY</th>
+                <th className="border border-emerald-800 p-4 text-left font-bold text-lg w-1/3">HỌ TÊN GIÁO VIÊN</th>
+                <th className="border border-emerald-800 p-4 text-center font-bold text-lg">SỐ ĐIỆN THOẠI (ZALO)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {uniqueTeacherNames.map((tName, idx) => {
+                const tInfo = teachers.find(t => t.name === tName);
+                const phone = tInfo?.phone ? tInfo.phone : '';
+                const subjects = Array.from(new Set(classScheds.filter(s => s.giao_vien === tName).map(s => s.mon))).join(', ');
+                const isHR = getHomeroomTeacher(classScheds) === tName;
+                
+                return (
+                  <tr key={tName} className={idx % 2 === 0 ? 'bg-emerald-50/40' : 'bg-white'}>
+                    <td className="border border-gray-300 p-4 text-center font-bold text-gray-500 text-lg">{idx + 1}</td>
+                    <td className="border border-gray-300 p-4 font-bold text-emerald-800 text-lg">{subjects}</td>
+                    <td className="border border-gray-300 p-4 font-bold text-gray-800 text-xl flex items-center">
+                      {tName} {isHR && <span className="ml-3 bg-amber-100 text-amber-700 text-sm font-black px-2 py-1 rounded border border-amber-300">GVCN</span>}
+                    </td>
+                    <td className="border border-gray-300 p-4 text-center font-black text-indigo-700 tracking-wider text-2xl">
+                      {phone || <span className="text-gray-300 text-base italic font-normal">Chưa cập nhật</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          
+          <div className="mt-8 text-right text-gray-400 italic text-sm">
+             Được xuất từ Hệ thống TKB Manager lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto relative">
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative overflow-hidden">
         <div className="flex flex-col lg:flex-row justify-between lg:items-center mb-6 border-b pb-4 border-gray-100 gap-4">
           <h2 className="text-2xl font-bold text-gray-800 flex items-center">
             <Calendar className="mr-2 text-emerald-600 h-7 w-7" /> Tra cứu TKB theo Lớp
@@ -293,8 +405,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
         {!selectedClass && (
           <div className="space-y-8 animate-in fade-in duration-300">
-            
-            {/* 🔥 HIỂN THỊ ƯU TIÊN LỚP CHỦ NHIỆM */}
             {myHomeroomClasses.length > 0 && !searchClass && !filterGrade && (
               <div className="bg-amber-50 rounded-xl p-5 border border-amber-200 shadow-sm">
                 <div className="flex items-center mb-4 border-b border-amber-200/50 pb-2">
@@ -318,7 +428,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               </div>
             )}
 
-            {/* DANH SÁCH CÁC KHỐI LỚP KHÁC */}
             {groupedClasses.map(group => (
               <div key={group.grade} className="bg-gray-50 rounded-xl p-5 border border-gray-100">
                 <div className="flex items-center mb-4 border-b border-gray-200 pb-2">
@@ -351,37 +460,120 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
         )}
 
         {selectedClass && (
-          <div className="animate-in slide-in-from-right-4 duration-300">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-              
-              <div>
-                <h3 className="text-xl font-black text-emerald-800 flex items-center">
-                  Lớp {String(selectedClass).replace(/\./g, '/')} 
-                  <span className="text-sm font-medium text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded ml-2 border border-emerald-200">
-                    {selectedVersion}
-                  </span>
-                </h3>
-                
-                <div className="text-sm font-bold text-emerald-700 mt-1 flex items-center">
-                  <UserCheck className="w-4 h-4 mr-1.5" />
-                  GVCN: <span className="ml-1 text-emerald-950 uppercase">{getHomeroomTeacher(getScheduleForClass(selectedClass))}</span>
-                </div>
-              </div>
-
+          <div className="animate-in slide-in-from-right-4 duration-300 relative z-10">
+            
+            {/* THIẾT LẬP THANH ĐIỀU KHIỂN & NÚT COPY */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
               <button 
                 onClick={() => setSelectedClass(null)}
-                className="text-sm text-white bg-gray-700 hover:bg-gray-800 px-5 py-2.5 rounded-lg transition-colors font-bold shadow whitespace-nowrap"
+                className="text-sm text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-5 py-2.5 rounded-lg transition-colors font-bold shadow-sm whitespace-nowrap"
               >
                 ← Trở lại danh sách Lớp
               </button>
+
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                <button 
+                  onClick={() => processImageCapture(tkbRef, 'TKB')}
+                  disabled={isCopyingTkb || isCopyingContacts}
+                  className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-all disabled:opacity-80
+                    ${tkbCopySuccess ? 'bg-green-500 text-white border border-green-600' : 'bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700'}
+                  `}
+                >
+                  {isCopyingTkb ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : (tkbCopySuccess ? <Check className="w-4 h-4 mr-2" /> : <ImageIcon className="w-4 h-4 mr-2" />)}
+                  {isCopyingTkb ? 'Đang tạo ảnh...' : (tkbCopySuccess ? 'Đã Copy xong!' : 'Copy ảnh TKB')}
+                </button>
+
+                <button 
+                  onClick={() => processImageCapture(contactsRef, 'DanhBa')}
+                  disabled={isCopyingTkb || isCopyingContacts}
+                  className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-all disabled:opacity-80
+                    ${contactsCopySuccess ? 'bg-green-500 text-white border border-green-600' : 'bg-[#0068FF] text-white border border-blue-700 hover:bg-blue-600'}
+                  `}
+                >
+                  {isCopyingContacts ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : (contactsCopySuccess ? <Check className="w-4 h-4 mr-2" /> : <PhoneCall className="w-4 h-4 mr-2" />)}
+                  {isCopyingContacts ? 'Đang tạo ảnh...' : (contactsCopySuccess ? 'Đã Copy xong!' : 'Copy ảnh Danh bạ')}
+                </button>
+              </div>
             </div>
-            {renderScheduleGrid(getScheduleForClass(selectedClass))}
+
+            {/* KHUNG NÀY SẼ ĐƯỢC CHỤP ẢNH LẠI BẰNG HTML-TO-IMAGE - TKB */}
+            <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden">
+              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
+                <Calendar className="w-96 h-96" />
+              </div>
+
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
+                <div>
+                  <h3 className="text-2xl sm:text-3xl font-black text-emerald-800 flex items-center tracking-tight">
+                    THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
+                  </h3>
+                  <div className="flex flex-wrap items-center mt-3 gap-3">
+                    <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
+                      Phiên bản: {selectedVersion}
+                    </span>
+                    <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
+                      <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
+                      GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(getScheduleForClass(selectedClass))}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {renderScheduleGrid(getScheduleForClass(selectedClass))}
+              
+              <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
+                * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
+              </div>
+            </div>
+
           </div>
         )}
       </div>
 
-      {/* Render cửa sổ nổi liên hệ khẩn cấp */}
+      {/* Render cửa sổ Liên hệ Khẩn cấp */}
       {renderContactModal()}
+
+      {/* RENDER BẢNG ẨN SAU HẬU TRƯỜNG ĐỂ CHỤP ẢNH */}
+      {renderHiddenContactsTemplate()}
+      
+      {/* Modal Fallback khi Trình duyệt chặn bộ nhớ tạm */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-gray-800 text-lg">📸 Ảnh {previewImage.type === 'TKB' ? 'Thời khóa biểu' : 'Danh bạ'} đã sẵn sàng!</h3>
+              <button onClick={() => setPreviewImage(null)} className="text-gray-500 hover:text-red-600 bg-gray-200 hover:bg-red-100 rounded-full p-1.5 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-sm text-center shrink-0">
+              <span className="font-bold">Trình duyệt đã chặn chức năng Copy tự động.</span> Thầy/cô vui lòng 
+              <span className="font-bold text-red-600 uppercase mx-1">Nhấn chuột phải vào ảnh bên dưới</span> 
+              (hoặc nhấn giữ nếu dùng điện thoại) và chọn <span className="font-bold">"Sao chép hình ảnh"</span> để dán vào Zalo nhé.
+            </div>
+            
+            <div className="p-6 overflow-y-auto bg-gray-200 flex justify-center items-start flex-1">
+              <img src={previewImage.url} alt="Báo cáo" className="max-w-full h-auto border border-gray-300 shadow-md rounded bg-white" />
+            </div>
+            
+            <div className="p-4 border-t border-gray-100 bg-white flex justify-center shrink-0">
+              <button 
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.download = `${previewImage.type}_Lop_${String(selectedClass).replace(/\./g, '_')}.png`;
+                  link.href = previewImage.url;
+                  link.click();
+                }} 
+                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-indigo-700 flex items-center transition-colors shadow-sm"
+              >
+                <Download className="w-5 h-5 mr-2" /> Hoặc Tải ảnh xuống máy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

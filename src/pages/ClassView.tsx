@@ -4,6 +4,8 @@ import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Search, Calendar, Layers, UserCheck, Filter, Star, Phone, MessageCircle, Video, X, PhoneCall, Copy, Check, Download, Loader2, Image as ImageIcon } from 'lucide-react';
 import { toBlob } from 'html-to-image'; 
+// 🔥 ĐÃ CẬP NHẬT: Import hàm formatSubjectName từ subjectUtils
+import { formatSubjectName } from '../utils/subjectUtils';
 
 export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherName }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
@@ -18,7 +20,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
   const [selectedSlot, setSelectedSlot] = useState<Schedule | null>(null);
 
-  // 🔥 STATES QUẢN LÝ QUY TRÌNH XUẤT ẢNH (2 BƯỚC AN TOÀN)
   const tkbRef = useRef<HTMLDivElement>(null);
   const contactsRef = useRef<HTMLDivElement>(null);
   
@@ -31,7 +32,8 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
   const [tkbCopySuccess, setTkbCopySuccess] = useState(false);
   const [contactsCopySuccess, setContactsCopySuccess] = useState(false);
 
-  // Reset Blobs khi đổi lớp hoặc đổi phiên bản
+  const [previewImage, setPreviewImage] = useState<{url: string, type: 'TKB'|'DanhBa'} | null>(null);
+
   useEffect(() => {
     setTkbBlob(null);
     setContactsBlob(null);
@@ -132,9 +134,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     return `https://zalo.me/${cleanPhone}`;
   };
 
-  // ============================================================================
-  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC 1 - TẠO ẢNH BẢO TOÀN CHIỀU RỘNG
-  // ============================================================================
   const generateImageBlob = async (ref: React.RefObject<HTMLDivElement>, type: 'TKB' | 'DanhBa') => {
     if (!ref.current) return;
     
@@ -143,19 +142,16 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
     try {
       await new Promise(resolve => setTimeout(resolve, 300)); 
-      
-      // Lấy chiều rộng thực tế của nội dung bên trong (chống cắt ảnh trên điện thoại)
-      // Ép tối thiểu 800px để ảnh luôn to, rõ ràng
       const scrollWidth = Math.max(ref.current.scrollWidth, 800);
 
       const blob = await toBlob(ref.current, {
         backgroundColor: '#ffffff',
         pixelRatio: 2, 
-        width: scrollWidth, // Ép camera phải rộng ra bằng scrollWidth
+        width: scrollWidth, 
         style: { 
           transform: 'none', 
           margin: '0',
-          width: `${scrollWidth}px`, // Ép phần tử con phải giãn ra hết cỡ
+          width: `${scrollWidth}px`, 
           maxWidth: 'none'
         }
       });
@@ -174,9 +170,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     }
   };
 
-  // ============================================================================
-  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC 2 - COPY VÀO BỘ NHỚ TẠM
-  // ============================================================================
   const handleCopyImage = async (blob: Blob, type: 'TKB' | 'DanhBa') => {
     try {
       const item = new ClipboardItem({ 'image/png': blob });
@@ -191,13 +184,11 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
       }
     } catch (error) {
       console.error('Lỗi clipboard:', error);
-      alert("Trình duyệt hoặc điện thoại của bạn đang chặn chức năng Copy ảnh trực tiếp. Vui lòng sử dụng nút TẢI ẢNH XUỐNG bên cạnh nhé!");
+      const url = URL.createObjectURL(blob);
+      setPreviewImage({ url, type });
     }
   };
 
-  // ============================================================================
-  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC DỰ PHÒNG - TẢI ẢNH XUỐNG
-  // ============================================================================
   const handleDownloadImage = (blob: Blob, type: 'TKB' | 'DanhBa') => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -250,7 +241,10 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                     >
                       {slot ? (
                         <div className="flex flex-col items-center">
-                          <span className="font-bold text-emerald-800 text-base">{slot.mon}</span>
+                          {/* 🔥 ĐÃ CẬP NHẬT: Dùng formatSubjectName với chế độ 'full' */}
+                          <span className="font-bold text-emerald-800 text-base">
+                            {formatSubjectName(slot.mon, 'full')}
+                          </span>
                           <span className="text-xs font-medium text-emerald-950 mt-1 flex items-center">
                             {slot.giao_vien}
                           </span>
@@ -320,7 +314,8 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
             )}
             
             <div className="mt-5 pt-4 border-t border-gray-100 flex justify-between items-center text-xs text-gray-400 font-medium">
-              <span>Đang dạy tiết: <strong className="text-gray-600">{selectedSlot.mon}</strong></span>
+              {/* 🔥 ĐÃ CẬP NHẬT: Dùng formatSubjectName với chế độ 'full' */}
+              <span>Đang dạy tiết: <strong className="text-gray-600">{formatSubjectName(selectedSlot.mon, 'full')}</strong></span>
               <span>Lớp: <strong className="text-gray-600">{String(selectedSlot.lop).replace(/\./g, '/')}</strong></span>
             </div>
           </div>
@@ -329,7 +324,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     );
   };
 
-  // 🔥 TEMPLATE ẨN ĐỂ CHỤP ẢNH DANH BẠ
   const renderHiddenContactsTemplate = () => {
     if (!selectedClass) return null;
     const classScheds = getScheduleForClass(selectedClass);
@@ -362,13 +356,16 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               {uniqueTeacherNames.map((tName, idx) => {
                 const tInfo = teachers.find(t => t.name === tName);
                 const phone = tInfo?.phone ? tInfo.phone : '';
-                const subjects = Array.from(new Set(classScheds.filter(s => s.giao_vien === tName).map(s => s.mon))).join(', ');
+                
+                // 🔥 ĐÃ CẬP NHẬT: Dùng formatSubjectName với chế độ 'full'
+                const subjects = Array.from(new Set(classScheds.filter(s => s.giao_vien === tName).map(s => formatSubjectName(s.mon, 'full')))).join(', ');
+                
                 const isHR = getHomeroomTeacher(classScheds) === tName;
                 
                 return (
                   <tr key={tName} className={idx % 2 === 0 ? 'bg-emerald-50/40' : 'bg-white'}>
                     <td className="border border-gray-300 p-4 text-center font-bold text-gray-500 text-lg">{idx + 1}</td>
-                    <td className="border border-gray-300 p-4 font-bold text-emerald-800 text-lg">{subjects}</td>
+                    <td className="border border-gray-300 p-4 font-bold text-emerald-800 text-lg leading-relaxed">{subjects}</td>
                     <td className="border border-gray-300 p-4 font-bold text-gray-800 text-xl flex items-center">
                       {tName} {isHR && <span className="ml-3 bg-amber-100 text-amber-700 text-sm font-black px-2 py-1 rounded border border-amber-300">GVCN</span>}
                     </td>
@@ -501,7 +498,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
         {selectedClass && (
           <div className="animate-in slide-in-from-right-4 duration-300 relative z-10">
             
-            {/* THIẾT LẬP THANH ĐIỀU KHIỂN & NÚT COPY KIỂU MỚI (2 BƯỚC) */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 bg-gray-50 p-3 rounded-xl border border-gray-200">
               <button 
                 onClick={() => setSelectedClass(null)}
@@ -512,7 +508,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
               <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
                 
-                {/* TOOL: ẢNH TKB */}
                 <div className="flex bg-white p-1 rounded-lg border border-emerald-200 shadow-sm w-full sm:w-auto">
                   {!tkbBlob ? (
                     <button 
@@ -545,7 +540,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                   )}
                 </div>
 
-                {/* TOOL: ẢNH DANH BẠ */}
                 <div className="flex bg-white p-1 rounded-lg border border-blue-200 shadow-sm w-full sm:w-auto">
                   {!contactsBlob ? (
                     <button 
@@ -581,7 +575,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               </div>
             </div>
 
-            {/* KHUNG NÀY SẼ ĐƯỢC CHỤP ẢNH LẠI BẰNG HTML-TO-IMAGE - TKB */}
             <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block min-w-full">
               <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
                 <Calendar className="w-96 h-96" />
@@ -615,11 +608,45 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
         )}
       </div>
 
-      {/* Render cửa sổ Liên hệ Khẩn cấp */}
       {renderContactModal()}
-
-      {/* RENDER BẢNG ẨN SAU HẬU TRƯỜNG ĐỂ CHỤP ẢNH */}
       {renderHiddenContactsTemplate()}
+      
+      {previewImage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-gray-800 text-lg">📸 Ảnh {previewImage.type === 'TKB' ? 'Thời khóa biểu' : 'Danh bạ'} đã sẵn sàng!</h3>
+              <button onClick={() => setPreviewImage(null)} className="text-gray-500 hover:text-red-600 bg-gray-200 hover:bg-red-100 rounded-full p-1.5 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-sm text-center shrink-0">
+              <span className="font-bold">Trình duyệt đã chặn chức năng Copy tự động.</span> Thầy/cô vui lòng 
+              <span className="font-bold text-red-600 uppercase mx-1">Nhấn chuột phải vào ảnh bên dưới</span> 
+              (hoặc nhấn giữ nếu dùng điện thoại) và chọn <span className="font-bold">"Sao chép hình ảnh"</span> để dán vào Zalo nhé.
+            </div>
+            
+            <div className="p-6 overflow-y-auto bg-gray-200 flex justify-center items-start flex-1">
+              <img src={previewImage.url} alt="Báo cáo" className="max-w-full h-auto border border-gray-300 shadow-md rounded bg-white" />
+            </div>
+            
+            <div className="p-4 border-t border-gray-100 bg-white flex justify-center shrink-0">
+              <button 
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.download = `${previewImage.type}_Lop_${String(selectedClass).replace(/\./g, '_')}.png`;
+                  link.href = previewImage.url;
+                  link.click();
+                }} 
+                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-indigo-700 flex items-center transition-colors shadow-sm"
+              >
+                <Download className="w-5 h-5 mr-2" /> Hoặc Tải ảnh xuống máy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

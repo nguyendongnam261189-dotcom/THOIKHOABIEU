@@ -581,33 +581,36 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               </div>
             </div>
 
-            {/* KHUNG NÀY SẼ ĐƯỢC CHỤP ẢNH LẠI BẰNG HTML-TO-IMAGE - TKB */}
-            <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block min-w-full">
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
-                <Calendar className="w-96 h-96" />
-              </div>
+            {/* BỌC KHỐI NÀY ĐỂ MÀN HÌNH NHỎ VUỐT NGANG ĐƯỢC MÀ KHÔNG ẢNH HƯỞNG XUẤT ẢNH */}
+            <div className="w-full overflow-x-auto pb-4">
+              {/* KHUNG NÀY SẼ ĐƯỢC CHỤP ẢNH LẠI BẰNG HTML-TO-IMAGE - TKB */}
+              <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block min-w-full">
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
+                  <Calendar className="w-96 h-96" />
+                </div>
 
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
-                <div>
-                  <h3 className="text-2xl sm:text-3xl font-black text-emerald-800 flex items-center tracking-tight">
-                    THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
-                  </h3>
-                  <div className="flex flex-wrap items-center mt-3 gap-3">
-                    <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
-                      Phiên bản: {selectedVersion}
-                    </span>
-                    <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
-                      <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
-                      GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(getScheduleForClass(selectedClass))}</span>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
+                  <div>
+                    <h3 className="text-2xl sm:text-3xl font-black text-emerald-800 flex items-center tracking-tight">
+                      THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
+                    </h3>
+                    <div className="flex flex-wrap items-center mt-3 gap-3">
+                      <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
+                        Phiên bản: {selectedVersion}
+                      </span>
+                      <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
+                        <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
+                        GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(getScheduleForClass(selectedClass))}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-              
-              {renderScheduleGrid(getScheduleForClass(selectedClass))}
-              
-              <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
-                * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
+                
+                {renderScheduleGrid(getScheduleForClass(selectedClass))}
+                
+                <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
+                  * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
+                </div>
               </div>
             </div>
 

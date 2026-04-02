@@ -256,12 +256,12 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                     >
                       {slot ? (
                         <div className="flex flex-col items-center">
-                          {/* SỬ DỤNG CHẾ ĐỘ SHORT CHO GIAO DIỆN WEB */}
+                          {/* Môn dùng SHORT, Tên Giáo viên GIỮ NGUYÊN BẢN GỐC */}
                           <span className="font-bold text-emerald-800 text-[14px]">
                             {formatSubjectName(slot.mon, 'short')}
                           </span>
                           <span className="text-[11px] font-medium text-emerald-950 mt-1 flex items-center text-center">
-                            {slot.giao_vien.split(' ').pop()} 
+                            {slot.giao_vien}
                           </span>
                         </div>
                       ) : <span className="text-gray-300 text-xs italic">-</span>}

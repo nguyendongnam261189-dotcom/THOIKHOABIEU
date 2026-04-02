@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { parseExcelFile } from '../services/excelParser';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle, Settings } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Trash2, Tag, Edit2, Check, X, Save, BarChart3, Users, ArrowRight, Filter, BookOpen, PlusCircle, Settings, PhoneCall, Phone } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
@@ -42,11 +42,17 @@ export const AdminDashboard: React.FC = () => {
   const [ktStudentName, setKtStudentName] = useState<string>('');
   const [selectedExportDept, setSelectedExportDept] = useState<string>('');
 
-  // 🔥 STATE CHO THÔNG TIN IN ẤN BÁO CÁO
+  // STATE CHO THÔNG TIN IN ẤN BÁO CÁO
   const [semesterConfig, setSemesterConfig] = useState('HỌC KÌ 1- NH 2024-2025');
   const [principalName, setPrincipalName] = useState('');
   const [vicePrincipalName, setVicePrincipalName] = useState('');
   const [ttcmName, setTtcmName] = useState('');
+
+  // 🔥 STATE CHO MODAL QUẢN LÝ DỮ LIỆU GIÁO VIÊN
+  const [showTeacherModal, setShowTeacherModal] = useState(false);
+  const [teacherSearch, setTeacherSearch] = useState('');
+  const [teacherFilterGroup, setTeacherFilterGroup] = useState('');
+  const [saveStatus, setSaveStatus] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
 
   const availablePcgdNames = useMemo(() => {
       return Array.from(new Set(teachers.map(t => t.name))).filter(n => n !== 'Chưa rõ').sort();
@@ -327,6 +333,69 @@ export const AdminDashboard: React.FC = () => {
       await loadData();
     } finally { setLoading(false); setShowDeleteConfirm(false); }
   };
+
+  // =====================================================================
+  // 🔥 QUẢN LÝ DỮ LIỆU & DANH BẠ GIÁO VIÊN
+  // =====================================================================
+  
+  const filteredAndSortedTeachersForModal = useMemo(() => {
+    return teachers
+      .filter(t => t.name !== 'Chưa rõ' && t.name !== 'nguyendongnam261189@gmail.com')
+      .filter(t => {
+        const matchSearch = String(t.name).toLowerCase().includes(teacherSearch.toLowerCase()) || 
+                            String(t.phone || '').includes(teacherSearch);
+        const matchGroup = teacherFilterGroup ? t.group === teacherFilterGroup : true;
+        return matchSearch && matchGroup;
+      })
+      .sort((a, b) => {
+        // Sắp xếp theo tên (từ cuối cùng) chuẩn Tiếng Việt
+        const nameA = String(a.name).split(' ').pop() || '';
+        const nameB = String(b.name).split(' ').pop() || '';
+        return nameA.localeCompare(nameB, 'vi');
+      });
+  }, [teachers, teacherSearch, teacherFilterGroup]);
+
+  const handleUpdateTeacherPhone = async (id: string, newPhone: string) => {
+    setSaveStatus(prev => ({ ...prev, [id]: 'saving' }));
+    try {
+      if (typeof teacherService.updateTeacher === 'function') {
+        await teacherService.updateTeacher(id, { phone: newPhone });
+      }
+      setTeachers(prev => prev.map(t => t.id === id ? { ...t, phone: newPhone } : t));
+      setSaveStatus(prev => ({ ...prev, [id]: 'saved' }));
+      setTimeout(() => {
+        setSaveStatus(prev => {
+          const newState = { ...prev };
+          delete newState[id];
+          return newState;
+        });
+      }, 2000);
+    } catch (err) {
+      console.error(err);
+      setSaveStatus(prev => ({ ...prev, [id]: 'error' }));
+    }
+  };
+
+  const handleDeleteTeacher = async (id: string, name: string) => {
+    const hasSchedules = allSchedules.some(s => s.giao_vien === name);
+    if (hasSchedules) {
+      if (!window.confirm(`CẢNH BÁO: Giáo viên "${name}" đang có lịch dạy trong hệ thống! Việc xóa có thể làm lỗi hiển thị Thời khóa biểu.\n\nBạn có chắc chắn muốn XÓA BỎ?`)) {
+        return;
+      }
+    } else {
+      if (!window.confirm(`Xóa giáo viên "${name}" khỏi Danh bạ?`)) return;
+    }
+
+    try {
+      if (typeof teacherService.deleteTeacher === 'function') {
+        await teacherService.deleteTeacher(id);
+      }
+      setTeachers(prev => prev.filter(t => t.id !== id));
+    } catch (error) {
+      alert("Lỗi khi xóa giáo viên.");
+    }
+  };
+
 
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
@@ -672,6 +741,105 @@ export const AdminDashboard: React.FC = () => {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4 relative">
       
+      {/* ===================================================================== */}
+      {/* 1. MODAL QUẢN LÝ DỮ LIỆU VÀ DANH BẠ (MỚI) */}
+      {/* ===================================================================== */}
+      {showTeacherModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10 px-4">
+          <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col h-[85vh] border border-indigo-100">
+            <div className="p-5 border-b flex justify-between items-center bg-indigo-50 rounded-t-2xl shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-indigo-900 flex items-center"><PhoneCall className="mr-3" /> Quản lý Danh bạ & Dữ liệu Giáo viên</h2>
+                <p className="text-indigo-700 text-sm mt-1">Cập nhật Số điện thoại trực tiếp hoặc dọn dẹp các giáo viên không còn giảng dạy.</p>
+              </div>
+              <button onClick={() => setShowTeacherModal(false)} className="text-gray-500 hover:text-red-500 bg-white rounded-full p-2 shadow-sm"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="p-4 border-b bg-gray-50 flex flex-col sm:flex-row gap-3 shrink-0">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <input
+                  type="text"
+                  placeholder="Tìm theo tên, SĐT..."
+                  className="pl-9 pr-3 py-2.5 w-full border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm"
+                  value={teacherSearch}
+                  onChange={(e) => setTeacherSearch(e.target.value)}
+                />
+              </div>
+              <select
+                className="px-3 py-2.5 sm:w-64 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm font-bold text-gray-700"
+                value={teacherFilterGroup}
+                onChange={(e) => setTeacherFilterGroup(e.target.value)}
+              >
+                <option value="">-- Tất cả Tổ CM --</option>
+                {dynamicDepartments.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-white p-4">
+              <div className="min-w-[700px]">
+                <div className="grid grid-cols-12 gap-3 p-3 bg-gray-100 rounded-lg font-bold text-gray-600 text-xs uppercase tracking-wider mb-2">
+                  <div className="col-span-1 text-center">STT</div>
+                  <div className="col-span-4">Họ và Tên</div>
+                  <div className="col-span-3">Tổ Chuyên Môn</div>
+                  <div className="col-span-3">Số Điện Thoại (Sửa & Tự lưu)</div>
+                  <div className="col-span-1 text-center">Xóa</div>
+                </div>
+
+                <div className="space-y-2">
+                  {filteredAndSortedTeachersForModal.length === 0 ? (
+                    <div className="text-center py-10 text-gray-400 italic">Không tìm thấy giáo viên nào phù hợp.</div>
+                  ) : (
+                    filteredAndSortedTeachersForModal.map((t, idx) => (
+                      <div key={t.id || t.name} className="grid grid-cols-12 gap-3 items-center p-3 border border-gray-100 rounded-xl hover:bg-indigo-50/30 transition-colors">
+                        <div className="col-span-1 text-center text-sm font-medium text-gray-500">{idx + 1}</div>
+                        <div className="col-span-4 font-bold text-gray-800 text-sm">{t.name}</div>
+                        <div className="col-span-3">
+                          <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium border border-gray-200">
+                            {t.group || 'Chưa phân tổ'}
+                          </span>
+                        </div>
+                        <div className="col-span-3 relative flex items-center">
+                          <Phone className="absolute left-3 w-4 h-4 text-gray-400" />
+                          <input
+                            type="text"
+                            defaultValue={t.phone || ''}
+                            onBlur={(e) => {
+                              if (e.target.value !== (t.phone || '')) {
+                                handleUpdateTeacherPhone(t.id!, e.target.value);
+                              }
+                            }}
+                            placeholder="Chưa nhập SĐT..."
+                            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                          />
+                          {saveStatus[t.id!] === 'saving' && <Loader2 className="absolute right-3 w-4 h-4 text-indigo-500 animate-spin" />}
+                          {saveStatus[t.id!] === 'saved' && <span className="absolute -right-14 text-xs font-bold text-green-600 animate-in fade-in">Đã lưu ✓</span>}
+                          {saveStatus[t.id!] === 'error' && <span className="absolute -right-10 text-xs font-bold text-red-600">Lỗi!</span>}
+                        </div>
+                        <div className="col-span-1 text-center">
+                          <button 
+                            onClick={() => handleDeleteTeacher(t.id!, t.name)}
+                            className="text-gray-400 hover:text-red-600 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                            title="Xóa giáo viên"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t bg-gray-50 rounded-b-2xl flex justify-between items-center shrink-0">
+              <span className="text-sm font-bold text-gray-600">Hiển thị: {filteredAndSortedTeachersForModal.length} Giáo viên</span>
+              <button onClick={() => setShowTeacherModal(false)} className="px-6 py-2 rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-900 shadow-sm transition-colors">Đóng cửa sổ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CÁC MODAL DICTIONARY & MAPPING GIỮ NGUYÊN */}
       {showDictionaryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm overflow-y-auto py-10">
@@ -872,12 +1040,20 @@ export const AdminDashboard: React.FC = () => {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800 flex items-center"><Upload className="mr-2 text-indigo-600" /> Nhập dữ liệu TKB</h2>
-          <button 
-            onClick={handleOpenDictionary}
-            className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-bold transition-colors"
-          >
-            <BookOpen className="w-4 h-4 mr-2" /> Quản lý Từ điển Tên
-          </button>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => setShowTeacherModal(true)}
+              className="flex items-center px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-sm font-bold transition-colors border border-blue-100 shadow-sm"
+            >
+              <PhoneCall className="w-4 h-4 mr-2" /> Quản lý Danh bạ GV
+            </button>
+            <button 
+              onClick={handleOpenDictionary}
+              className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-bold transition-colors border border-indigo-100 shadow-sm"
+            >
+              <BookOpen className="w-4 h-4 mr-2" /> Quản lý Từ điển Tên
+            </button>
+          </div>
         </div>
 
         {status && (

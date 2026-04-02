@@ -4,7 +4,6 @@ import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Search, Calendar, Layers, UserCheck, Filter, Star, Phone, MessageCircle, Video, X, PhoneCall, Copy, Check, Download, Loader2, Image as ImageIcon } from 'lucide-react';
 import { toBlob } from 'html-to-image'; 
-import { formatSubjectName } from '../utils/subjectUtils';
 
 export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherName }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
@@ -19,7 +18,8 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
   const [selectedSlot, setSelectedSlot] = useState<Schedule | null>(null);
 
-  const tkbExportRef = useRef<HTMLDivElement>(null);
+  // 🔥 STATES QUẢN LÝ QUY TRÌNH XUẤT ẢNH (2 BƯỚC AN TOÀN)
+  const tkbRef = useRef<HTMLDivElement>(null);
   const contactsRef = useRef<HTMLDivElement>(null);
   
   const [tkbBlob, setTkbBlob] = useState<Blob | null>(null);
@@ -31,8 +31,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
   const [tkbCopySuccess, setTkbCopySuccess] = useState(false);
   const [contactsCopySuccess, setContactsCopySuccess] = useState(false);
 
-  const [previewImage, setPreviewImage] = useState<{url: string, type: 'TKB'|'DanhBa'} | null>(null);
-
+  // Reset Blobs khi đổi lớp hoặc đổi phiên bản
   useEffect(() => {
     setTkbBlob(null);
     setContactsBlob(null);
@@ -133,6 +132,9 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     return `https://zalo.me/${cleanPhone}`;
   };
 
+  // ============================================================================
+  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC 1 - TẠO ẢNH BẢO TOÀN CHIỀU RỘNG
+  // ============================================================================
   const generateImageBlob = async (ref: React.RefObject<HTMLDivElement>, type: 'TKB' | 'DanhBa') => {
     if (!ref.current) return;
     
@@ -142,16 +144,18 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     try {
       await new Promise(resolve => setTimeout(resolve, 300)); 
       
-      const scrollWidth = ref.current.offsetWidth || 1000;
+      // Lấy chiều rộng thực tế của nội dung bên trong (chống cắt ảnh trên điện thoại)
+      // Ép tối thiểu 800px để ảnh luôn to, rõ ràng
+      const scrollWidth = Math.max(ref.current.scrollWidth, 800);
 
       const blob = await toBlob(ref.current, {
         backgroundColor: '#ffffff',
         pixelRatio: 2, 
-        width: scrollWidth, 
+        width: scrollWidth, // Ép camera phải rộng ra bằng scrollWidth
         style: { 
           transform: 'none', 
           margin: '0',
-          width: `${scrollWidth}px`, 
+          width: `${scrollWidth}px`, // Ép phần tử con phải giãn ra hết cỡ
           maxWidth: 'none'
         }
       });
@@ -170,6 +174,9 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     }
   };
 
+  // ============================================================================
+  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC 2 - COPY VÀO BỘ NHỚ TẠM
+  // ============================================================================
   const handleCopyImage = async (blob: Blob, type: 'TKB' | 'DanhBa') => {
     try {
       const item = new ClipboardItem({ 'image/png': blob });
@@ -184,11 +191,13 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
       }
     } catch (error) {
       console.error('Lỗi clipboard:', error);
-      const url = URL.createObjectURL(blob);
-      setPreviewImage({ url, type });
+      alert("Trình duyệt hoặc điện thoại của bạn đang chặn chức năng Copy ảnh trực tiếp. Vui lòng sử dụng nút TẢI ẢNH XUỐNG bên cạnh nhé!");
     }
   };
 
+  // ============================================================================
+  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC DỰ PHÒNG - TẢI ẢNH XUỐNG
+  // ============================================================================
   const handleDownloadImage = (blob: Blob, type: 'TKB' | 'DanhBa') => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -199,39 +208,26 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
   };
 
 
-  // ============================================================================
-  // 🔥 BẢNG 1: HIỂN THỊ TRÊN WEB (SMART RESIZE & CHẾ ĐỘ SHORT)
-  // ============================================================================
-  const renderScheduleGridWeb = (classSchedules: Schedule[]) => {
+  const renderScheduleGrid = (classSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
     const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    
-    // Hàm kiểm tra ngày có tiết học không
-    const dayHasClass = (day: number) => classSchedules.some(s => s.thu === day);
 
     return (
       <div className="overflow-x-auto mt-4 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10 w-full">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-emerald-50/50">
             <tr>
-              <th className="px-2 py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r whitespace-nowrap min-w-[50px] w-[50px]">
-                Tiết
-              </th>
-              {days.map(day => {
-                const isActive = dayHasClass(day);
-                return (
-                  <th key={day} className={`py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r ${isActive ? 'px-4 min-w-[100px]' : 'px-1 w-[40px] whitespace-nowrap'}`}>
-                    {isActive ? `Thứ ${day}` : `T${day}`}
-                  </th>
-                );
-              })}
+              <th className="px-4 py-3 text-left text-xs font-bold text-emerald-800 uppercase tracking-wider border-r">Tiết \ Thứ</th>
+              {days.map(day => (
+                <th key={day} className="px-4 py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r">Thứ {day}</th>
+              ))}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {periods.map(period => (
               <tr key={period} className={period === 5 ? 'border-b-4 border-emerald-100' : ''}>
-                <td className="px-2 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50 text-center">
-                  T{period <= 5 ? period : period - 5}
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50">
+                  Tiết {period <= 5 ? period : period - 5} {period <= 5 ? '(Sáng)' : '(Chiều)'}
                 </td>
                 {days.map(day => {
                   const session = period <= 5 ? 'Sáng' : 'Chiều';
@@ -241,14 +237,12 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                   const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
                   
                   const isClickable = slot && slot.giao_vien !== 'Chưa rõ';
-                  const isActive = dayHasClass(day);
 
                   return (
                     <td 
                       key={`${day}-${period}`} 
                       onClick={() => isClickable && setSelectedSlot(slot)}
-                      className={`py-3 text-center border-r transition-all
-                        ${isActive ? 'px-2' : 'px-0'}
+                      className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r transition-all
                         ${slot ? 'bg-emerald-50/40' : 'bg-gray-50/30'}
                         ${isClickable ? 'cursor-pointer hover:bg-emerald-100 hover:shadow-inner ring-1 ring-transparent hover:ring-emerald-300' : ''}
                       `}
@@ -256,13 +250,11 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                     >
                       {slot ? (
                         <div className="flex flex-col items-center">
-                          {/* Môn dùng SHORT, Tên Giáo viên GIỮ NGUYÊN BẢN GỐC */}
-                          <span className="font-bold text-emerald-800 text-[14px]">
-                            {formatSubjectName(slot.mon, 'short')}
-                          </span>
-                          <span className="text-[11px] font-medium text-emerald-950 mt-1 flex items-center text-center">
+                          <span className="font-bold text-emerald-800 text-base">{slot.mon}</span>
+                          <span className="text-xs font-medium text-emerald-950 mt-1 flex items-center">
                             {slot.giao_vien}
                           </span>
+                          {hasRoom && <span className="text-[10px] text-gray-500 mt-0.5 bg-white px-1.5 rounded border border-gray-200 shadow-sm">P.{cleanPhong}</span>}
                         </div>
                       ) : <span className="text-gray-300 text-xs italic">-</span>}
                     </td>
@@ -275,112 +267,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
       </div>
     );
   };
-
-  // ============================================================================
-  // 🔥 BẢNG 2: ẨN ĐỂ XUẤT ẢNH ZALO (ÉP CỘT THÔNG MINH - XUỐNG DÒNG MÔN DÀI)
-  // ============================================================================
-  const renderHiddenTkbExportTemplate = () => {
-    if (!selectedClass) return null;
-    const classSchedules = getScheduleForClass(selectedClass);
-    const days = [2, 3, 4, 5, 6, 7];
-    const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    
-    // Thuật toán kiểm tra ngày bận/trống
-    const dayHasClass = (day: number) => classSchedules.some(s => s.thu === day);
-
-    return (
-      <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
-        <div ref={tkbExportRef} className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block w-[1000px]">
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
-            <Calendar className="w-96 h-96" />
-          </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
-            <div>
-              <h3 className="text-3xl font-black text-emerald-800 flex items-center tracking-tight">
-                THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
-              </h3>
-              <div className="flex flex-wrap items-center mt-3 gap-3">
-                <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
-                  Phiên bản: {selectedVersion}
-                </span>
-                <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
-                  <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
-                  GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(classSchedules)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="mt-4 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10 w-full overflow-hidden">
-            {/* CSS Magic: table-layout fixed kết hợp style width ở thẻ th */}
-            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
-              <thead className="bg-emerald-50/50">
-                <tr>
-                  <th className="px-1 py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r" style={{ width: '60px' }}>
-                    Tiết
-                  </th>
-                  {days.map(day => {
-                    const isActive = dayHasClass(day);
-                    return (
-                      <th key={day} 
-                          className="py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r"
-                          style={{ width: isActive ? 'auto' : '45px' }} // Các cột 'auto' sẽ tự chia đều diện tích dư
-                      >
-                        {isActive ? `Thứ ${day}` : `T${day}`}
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {periods.map(period => (
-                  <tr key={period} className={period === 5 ? 'border-b-4 border-emerald-100' : ''}>
-                    <td className="px-1 py-3 whitespace-nowrap font-bold text-gray-700 border-r bg-gray-50 text-center flex flex-col justify-center items-center h-full">
-                      <span className="text-[13px]">T{period <= 5 ? period : period - 5}</span>
-                      <span className="text-[10px] text-gray-400 font-normal">{period <= 5 ? '(Sáng)' : '(C)'}</span>
-                    </td>
-                    {days.map(day => {
-                      const session = period <= 5 ? 'Sáng' : 'Chiều';
-                      const adjustedPeriod = period <= 5 ? period : period - 5;
-                      const slot = classSchedules.find(s => s.thu === day && s.tiet === adjustedPeriod && s.buoi === session);
-                      const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
-                      const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
-                      
-                      return (
-                        <td 
-                          key={`${day}-${period}`} 
-                          className={`p-1 text-center border-r align-middle ${slot ? 'bg-emerald-50/40' : 'bg-gray-50/30'}`}
-                        >
-                          {slot ? (
-                            <div className="flex flex-col items-center justify-center h-full w-full">
-                              {/* CHẾ ĐỘ FULL: ÉP XUỐNG DÒNG, CHỮ NHỎ LẠI TÍ CHÚT ĐỂ VỪA KHUNG */}
-                              <span className="font-bold text-emerald-800 text-[13px] leading-tight break-words whitespace-normal text-center w-full px-1">
-                                {formatSubjectName(slot.mon, 'full')}
-                              </span>
-                              <span className="text-[11px] font-medium text-gray-600 mt-1 text-center whitespace-normal break-words w-full">
-                                {slot.giao_vien}
-                              </span>
-                              {hasRoom && <span className="text-[9px] text-gray-500 mt-0.5 bg-white px-1.5 rounded border border-gray-200 shadow-sm inline-block">P.{cleanPhong}</span>}
-                            </div>
-                          ) : <span className="text-gray-300 text-xs italic">-</span>}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
-            * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
 
   const renderContactModal = () => {
     if (!selectedSlot) return null;
@@ -434,7 +320,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
             )}
             
             <div className="mt-5 pt-4 border-t border-gray-100 flex justify-between items-center text-xs text-gray-400 font-medium">
-              <span>Đang dạy tiết: <strong className="text-gray-600">{formatSubjectName(selectedSlot.mon, 'full')}</strong></span>
+              <span>Đang dạy tiết: <strong className="text-gray-600">{selectedSlot.mon}</strong></span>
               <span>Lớp: <strong className="text-gray-600">{String(selectedSlot.lop).replace(/\./g, '/')}</strong></span>
             </div>
           </div>
@@ -443,6 +329,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     );
   };
 
+  // 🔥 TEMPLATE ẨN ĐỂ CHỤP ẢNH DANH BẠ
   const renderHiddenContactsTemplate = () => {
     if (!selectedClass) return null;
     const classScheds = getScheduleForClass(selectedClass);
@@ -475,15 +362,13 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               {uniqueTeacherNames.map((tName, idx) => {
                 const tInfo = teachers.find(t => t.name === tName);
                 const phone = tInfo?.phone ? tInfo.phone : '';
-                
-                const subjects = Array.from(new Set(classScheds.filter(s => s.giao_vien === tName).map(s => formatSubjectName(s.mon, 'full')))).join(', ');
-                
+                const subjects = Array.from(new Set(classScheds.filter(s => s.giao_vien === tName).map(s => s.mon))).join(', ');
                 const isHR = getHomeroomTeacher(classScheds) === tName;
                 
                 return (
                   <tr key={tName} className={idx % 2 === 0 ? 'bg-emerald-50/40' : 'bg-white'}>
                     <td className="border border-gray-300 p-4 text-center font-bold text-gray-500 text-lg">{idx + 1}</td>
-                    <td className="border border-gray-300 p-4 font-bold text-emerald-800 text-lg leading-relaxed">{subjects}</td>
+                    <td className="border border-gray-300 p-4 font-bold text-emerald-800 text-lg">{subjects}</td>
                     <td className="border border-gray-300 p-4 font-bold text-gray-800 text-xl flex items-center">
                       {tName} {isHR && <span className="ml-3 bg-amber-100 text-amber-700 text-sm font-black px-2 py-1 rounded border border-amber-300">GVCN</span>}
                     </td>
@@ -616,6 +501,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
         {selectedClass && (
           <div className="animate-in slide-in-from-right-4 duration-300 relative z-10">
             
+            {/* THIẾT LẬP THANH ĐIỀU KHIỂN & NÚT COPY KIỂU MỚI (2 BƯỚC) */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 bg-gray-50 p-3 rounded-xl border border-gray-200">
               <button 
                 onClick={() => setSelectedClass(null)}
@@ -626,10 +512,11 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
               <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
                 
+                {/* TOOL: ẢNH TKB */}
                 <div className="flex bg-white p-1 rounded-lg border border-emerald-200 shadow-sm w-full sm:w-auto">
                   {!tkbBlob ? (
                     <button 
-                      onClick={() => generateImageBlob(tkbExportRef, 'TKB')} 
+                      onClick={() => generateImageBlob(tkbRef, 'TKB')}
                       disabled={isGeneratingTkb || isGeneratingContacts}
                       className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-md text-sm font-bold transition-all disabled:opacity-50 flex justify-center items-center"
                     >
@@ -658,6 +545,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                   )}
                 </div>
 
+                {/* TOOL: ẢNH DANH BẠ */}
                 <div className="flex bg-white p-1 rounded-lg border border-blue-200 shadow-sm w-full sm:w-auto">
                   {!contactsBlob ? (
                     <button 
@@ -693,55 +581,45 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               </div>
             </div>
 
-            {/* BẢNG TRÊN WEB (DÙNG CHẾ ĐỘ SHORT VÀ TỰ ĐỘNG THU NHỎ CỘT TRỐNG) */}
-            {renderScheduleGridWeb(getScheduleForClass(selectedClass))}
+            {/* KHUNG NÀY SẼ ĐƯỢC CHỤP ẢNH LẠI BẰNG HTML-TO-IMAGE - TKB */}
+            <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block min-w-full">
+              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
+                <Calendar className="w-96 h-96" />
+              </div>
+
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
+                <div>
+                  <h3 className="text-2xl sm:text-3xl font-black text-emerald-800 flex items-center tracking-tight">
+                    THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
+                  </h3>
+                  <div className="flex flex-wrap items-center mt-3 gap-3">
+                    <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
+                      Phiên bản: {selectedVersion}
+                    </span>
+                    <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
+                      <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
+                      GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(getScheduleForClass(selectedClass))}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {renderScheduleGrid(getScheduleForClass(selectedClass))}
+              
+              <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
+                * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
+              </div>
+            </div>
 
           </div>
         )}
       </div>
 
+      {/* Render cửa sổ Liên hệ Khẩn cấp */}
       {renderContactModal()}
-      
-      {/* 2 BẢNG ẨN ĐỂ XUẤT ẢNH CHẾ ĐỘ FULL */}
-      {renderHiddenTkbExportTemplate()}
+
+      {/* RENDER BẢNG ẨN SAU HẬU TRƯỜNG ĐỂ CHỤP ẢNH */}
       {renderHiddenContactsTemplate()}
-      
-      {previewImage && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-gray-800 text-lg">📸 Ảnh {previewImage.type === 'TKB' ? 'Thời khóa biểu' : 'Danh bạ'} đã sẵn sàng!</h3>
-              <button onClick={() => setPreviewImage(null)} className="text-gray-500 hover:text-red-600 bg-gray-200 hover:bg-red-100 rounded-full p-1.5 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-4 bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-sm text-center shrink-0">
-              <span className="font-bold">Trình duyệt đã chặn chức năng Copy tự động.</span> Thầy/cô vui lòng 
-              <span className="font-bold text-red-600 uppercase mx-1">Nhấn chuột phải vào ảnh bên dưới</span> 
-              (hoặc nhấn giữ nếu dùng điện thoại) và chọn <span className="font-bold">"Sao chép hình ảnh"</span> để dán vào Zalo nhé.
-            </div>
-            
-            <div className="p-6 overflow-y-auto bg-gray-200 flex justify-center items-start flex-1">
-              <img src={previewImage.url} alt="Báo cáo" className="max-w-full h-auto border border-gray-300 shadow-md rounded bg-white" />
-            </div>
-            
-            <div className="p-4 border-t border-gray-100 bg-white flex justify-center shrink-0">
-              <button 
-                onClick={() => {
-                  const link = document.createElement('a');
-                  link.download = `${previewImage.type}_Lop_${String(selectedClass).replace(/\./g, '_')}.png`;
-                  link.href = previewImage.url;
-                  link.click();
-                }} 
-                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-indigo-700 flex items-center transition-colors shadow-sm"
-              >
-                <Download className="w-5 h-5 mr-2" /> Hoặc Tải ảnh xuống máy
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

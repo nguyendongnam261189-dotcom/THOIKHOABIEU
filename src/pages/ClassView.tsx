@@ -4,7 +4,6 @@ import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Search, Calendar, Layers, UserCheck, Filter, Star, Phone, MessageCircle, Video, X, PhoneCall, Copy, Check, Download, Loader2, Image as ImageIcon } from 'lucide-react';
 import { toBlob } from 'html-to-image'; 
-// 🔥 ĐÃ CẬP NHẬT: Import hàm formatSubjectName từ subjectUtils
 import { formatSubjectName } from '../utils/subjectUtils';
 
 export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherName }) => {
@@ -20,7 +19,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
   const [selectedSlot, setSelectedSlot] = useState<Schedule | null>(null);
 
-  const tkbRef = useRef<HTMLDivElement>(null);
+  const tkbExportRef = useRef<HTMLDivElement>(null);
   const contactsRef = useRef<HTMLDivElement>(null);
   
   const [tkbBlob, setTkbBlob] = useState<Blob | null>(null);
@@ -142,7 +141,8 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
     try {
       await new Promise(resolve => setTimeout(resolve, 300)); 
-      const scrollWidth = Math.max(ref.current.scrollWidth, 800);
+      
+      const scrollWidth = ref.current.offsetWidth || 1000;
 
       const blob = await toBlob(ref.current, {
         backgroundColor: '#ffffff',
@@ -199,26 +199,39 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
   };
 
 
-  const renderScheduleGrid = (classSchedules: Schedule[]) => {
+  // ============================================================================
+  // 🔥 BẢNG 1: HIỂN THỊ TRÊN WEB (SMART RESIZE & CHẾ ĐỘ SHORT)
+  // ============================================================================
+  const renderScheduleGridWeb = (classSchedules: Schedule[]) => {
     const days = [2, 3, 4, 5, 6, 7];
     const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    
+    // Hàm kiểm tra ngày có tiết học không
+    const dayHasClass = (day: number) => classSchedules.some(s => s.thu === day);
 
     return (
       <div className="overflow-x-auto mt-4 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10 w-full">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-emerald-50/50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-bold text-emerald-800 uppercase tracking-wider border-r">Tiết \ Thứ</th>
-              {days.map(day => (
-                <th key={day} className="px-4 py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r">Thứ {day}</th>
-              ))}
+              <th className="px-2 py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r whitespace-nowrap min-w-[50px] w-[50px]">
+                Tiết
+              </th>
+              {days.map(day => {
+                const isActive = dayHasClass(day);
+                return (
+                  <th key={day} className={`py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r ${isActive ? 'px-4 min-w-[100px]' : 'px-1 w-[40px] whitespace-nowrap'}`}>
+                    {isActive ? `Thứ ${day}` : `T${day}`}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {periods.map(period => (
               <tr key={period} className={period === 5 ? 'border-b-4 border-emerald-100' : ''}>
-                <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50">
-                  Tiết {period <= 5 ? period : period - 5} {period <= 5 ? '(Sáng)' : '(Chiều)'}
+                <td className="px-2 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50 text-center">
+                  T{period <= 5 ? period : period - 5}
                 </td>
                 {days.map(day => {
                   const session = period <= 5 ? 'Sáng' : 'Chiều';
@@ -228,12 +241,14 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                   const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
                   
                   const isClickable = slot && slot.giao_vien !== 'Chưa rõ';
+                  const isActive = dayHasClass(day);
 
                   return (
                     <td 
                       key={`${day}-${period}`} 
                       onClick={() => isClickable && setSelectedSlot(slot)}
-                      className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r transition-all
+                      className={`py-3 text-center border-r transition-all
+                        ${isActive ? 'px-2' : 'px-0'}
                         ${slot ? 'bg-emerald-50/40' : 'bg-gray-50/30'}
                         ${isClickable ? 'cursor-pointer hover:bg-emerald-100 hover:shadow-inner ring-1 ring-transparent hover:ring-emerald-300' : ''}
                       `}
@@ -241,14 +256,13 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                     >
                       {slot ? (
                         <div className="flex flex-col items-center">
-                          {/* 🔥 ĐÃ CẬP NHẬT: Dùng formatSubjectName với chế độ 'full' */}
-                          <span className="font-bold text-emerald-800 text-base">
-                            {formatSubjectName(slot.mon, 'full')}
+                          {/* SỬ DỤNG CHẾ ĐỘ SHORT CHO GIAO DIỆN WEB */}
+                          <span className="font-bold text-emerald-800 text-[14px]">
+                            {formatSubjectName(slot.mon, 'short')}
                           </span>
-                          <span className="text-xs font-medium text-emerald-950 mt-1 flex items-center">
-                            {slot.giao_vien}
+                          <span className="text-[11px] font-medium text-emerald-950 mt-1 flex items-center text-center">
+                            {slot.giao_vien.split(' ').pop()} 
                           </span>
-                          {hasRoom && <span className="text-[10px] text-gray-500 mt-0.5 bg-white px-1.5 rounded border border-gray-200 shadow-sm">P.{cleanPhong}</span>}
                         </div>
                       ) : <span className="text-gray-300 text-xs italic">-</span>}
                     </td>
@@ -261,6 +275,112 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
       </div>
     );
   };
+
+  // ============================================================================
+  // 🔥 BẢNG 2: ẨN ĐỂ XUẤT ẢNH ZALO (ÉP CỘT THÔNG MINH - XUỐNG DÒNG MÔN DÀI)
+  // ============================================================================
+  const renderHiddenTkbExportTemplate = () => {
+    if (!selectedClass) return null;
+    const classSchedules = getScheduleForClass(selectedClass);
+    const days = [2, 3, 4, 5, 6, 7];
+    const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    
+    // Thuật toán kiểm tra ngày bận/trống
+    const dayHasClass = (day: number) => classSchedules.some(s => s.thu === day);
+
+    return (
+      <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+        <div ref={tkbExportRef} className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block w-[1000px]">
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
+            <Calendar className="w-96 h-96" />
+          </div>
+
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
+            <div>
+              <h3 className="text-3xl font-black text-emerald-800 flex items-center tracking-tight">
+                THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
+              </h3>
+              <div className="flex flex-wrap items-center mt-3 gap-3">
+                <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
+                  Phiên bản: {selectedVersion}
+                </span>
+                <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
+                  <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
+                  GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(classSchedules)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="mt-4 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10 w-full overflow-hidden">
+            {/* CSS Magic: table-layout fixed kết hợp style width ở thẻ th */}
+            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
+              <thead className="bg-emerald-50/50">
+                <tr>
+                  <th className="px-1 py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r" style={{ width: '60px' }}>
+                    Tiết
+                  </th>
+                  {days.map(day => {
+                    const isActive = dayHasClass(day);
+                    return (
+                      <th key={day} 
+                          className="py-3 text-center text-xs font-bold text-emerald-800 uppercase tracking-wider border-r"
+                          style={{ width: isActive ? 'auto' : '45px' }} // Các cột 'auto' sẽ tự chia đều diện tích dư
+                      >
+                        {isActive ? `Thứ ${day}` : `T${day}`}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {periods.map(period => (
+                  <tr key={period} className={period === 5 ? 'border-b-4 border-emerald-100' : ''}>
+                    <td className="px-1 py-3 whitespace-nowrap font-bold text-gray-700 border-r bg-gray-50 text-center flex flex-col justify-center items-center h-full">
+                      <span className="text-[13px]">T{period <= 5 ? period : period - 5}</span>
+                      <span className="text-[10px] text-gray-400 font-normal">{period <= 5 ? '(Sáng)' : '(C)'}</span>
+                    </td>
+                    {days.map(day => {
+                      const session = period <= 5 ? 'Sáng' : 'Chiều';
+                      const adjustedPeriod = period <= 5 ? period : period - 5;
+                      const slot = classSchedules.find(s => s.thu === day && s.tiet === adjustedPeriod && s.buoi === session);
+                      const cleanPhong = slot?.phong ? String(slot.phong).trim() : '';
+                      const hasRoom = cleanPhong !== '' && cleanPhong.toLowerCase() !== 'null' && cleanPhong.toLowerCase() !== 'undefined';
+                      
+                      return (
+                        <td 
+                          key={`${day}-${period}`} 
+                          className={`p-1 text-center border-r align-middle ${slot ? 'bg-emerald-50/40' : 'bg-gray-50/30'}`}
+                        >
+                          {slot ? (
+                            <div className="flex flex-col items-center justify-center h-full w-full">
+                              {/* CHẾ ĐỘ FULL: ÉP XUỐNG DÒNG, CHỮ NHỎ LẠI TÍ CHÚT ĐỂ VỪA KHUNG */}
+                              <span className="font-bold text-emerald-800 text-[13px] leading-tight break-words whitespace-normal text-center w-full px-1">
+                                {formatSubjectName(slot.mon, 'full')}
+                              </span>
+                              <span className="text-[11px] font-medium text-gray-600 mt-1 text-center whitespace-normal break-words w-full">
+                                {slot.giao_vien}
+                              </span>
+                              {hasRoom && <span className="text-[9px] text-gray-500 mt-0.5 bg-white px-1.5 rounded border border-gray-200 shadow-sm inline-block">P.{cleanPhong}</span>}
+                            </div>
+                          ) : <span className="text-gray-300 text-xs italic">-</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
+            * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
 
   const renderContactModal = () => {
     if (!selectedSlot) return null;
@@ -314,7 +434,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
             )}
             
             <div className="mt-5 pt-4 border-t border-gray-100 flex justify-between items-center text-xs text-gray-400 font-medium">
-              {/* 🔥 ĐÃ CẬP NHẬT: Dùng formatSubjectName với chế độ 'full' */}
               <span>Đang dạy tiết: <strong className="text-gray-600">{formatSubjectName(selectedSlot.mon, 'full')}</strong></span>
               <span>Lớp: <strong className="text-gray-600">{String(selectedSlot.lop).replace(/\./g, '/')}</strong></span>
             </div>
@@ -357,7 +476,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                 const tInfo = teachers.find(t => t.name === tName);
                 const phone = tInfo?.phone ? tInfo.phone : '';
                 
-                // 🔥 ĐÃ CẬP NHẬT: Dùng formatSubjectName với chế độ 'full'
                 const subjects = Array.from(new Set(classScheds.filter(s => s.giao_vien === tName).map(s => formatSubjectName(s.mon, 'full')))).join(', ');
                 
                 const isHR = getHomeroomTeacher(classScheds) === tName;
@@ -511,7 +629,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                 <div className="flex bg-white p-1 rounded-lg border border-emerald-200 shadow-sm w-full sm:w-auto">
                   {!tkbBlob ? (
                     <button 
-                      onClick={() => generateImageBlob(tkbRef, 'TKB')}
+                      onClick={() => generateImageBlob(tkbExportRef, 'TKB')} 
                       disabled={isGeneratingTkb || isGeneratingContacts}
                       className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-md text-sm font-bold transition-all disabled:opacity-50 flex justify-center items-center"
                     >
@@ -575,40 +693,17 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
               </div>
             </div>
 
-            <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block min-w-full">
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
-                <Calendar className="w-96 h-96" />
-              </div>
-
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 relative z-10">
-                <div>
-                  <h3 className="text-2xl sm:text-3xl font-black text-emerald-800 flex items-center tracking-tight">
-                    THỜI KHÓA BIỂU LỚP {String(selectedClass).replace(/\./g, '/')} 
-                  </h3>
-                  <div className="flex flex-wrap items-center mt-3 gap-3">
-                    <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
-                      Phiên bản: {selectedVersion}
-                    </span>
-                    <div className="text-sm font-bold text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm flex items-center">
-                      <UserCheck className="w-4 h-4 mr-1.5 text-gray-500" />
-                      GVCN: <span className="ml-1 uppercase text-gray-900">{getHomeroomTeacher(getScheduleForClass(selectedClass))}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {renderScheduleGrid(getScheduleForClass(selectedClass))}
-              
-              <div className="mt-5 text-right text-[11px] text-gray-400 italic relative z-10 font-medium">
-                * Cập nhật lúc {new Date().toLocaleTimeString('vi-VN')} ngày {new Date().toLocaleDateString('vi-VN')}
-              </div>
-            </div>
+            {/* BẢNG TRÊN WEB (DÙNG CHẾ ĐỘ SHORT VÀ TỰ ĐỘNG THU NHỎ CỘT TRỐNG) */}
+            {renderScheduleGridWeb(getScheduleForClass(selectedClass))}
 
           </div>
         )}
       </div>
 
       {renderContactModal()}
+      
+      {/* 2 BẢNG ẨN ĐỂ XUẤT ẢNH CHẾ ĐỘ FULL */}
+      {renderHiddenTkbExportTemplate()}
       {renderHiddenContactsTemplate()}
       
       {previewImage && (

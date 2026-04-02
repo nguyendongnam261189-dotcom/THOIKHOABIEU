@@ -181,7 +181,9 @@ const App: React.FC = () => {
           <Route path="/" element={user ? <Layout role={role} /> : <Navigate to="/login" />}>
             {/* 🔥 CẬP NHẬT: Đặt Trang Danh bạ làm trang chủ mặc định (index) */}
             <Route index element={<Directory role={role} department={department} teacherName={teacherName} />} />
-            <Route path="class" element={<ClassView />} />
+            
+            {/* 🔥 CẬP NHẬT: Đã truyền teacherName vào ClassView để tự động tìm Lớp Chủ Nhiệm */}
+            <Route path="class" element={<ClassView teacherName={teacherName} />} />
             
             <Route 
               path="admin" 

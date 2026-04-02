@@ -37,7 +37,7 @@ export const teacherService = {
     try {
       const batch = writeBatch(db);
       
-      // 1. Lấy dữ liệu hiện có trên Firebase để đối soát tổ chuyên môn
+      // 1. Lấy dữ liệu hiện có trên Firebase để đối soát
       const existingSnapshot = await getDocs(collection(db, COLLECTION_NAME));
       const existingMap = new Map();
       existingSnapshot.forEach(doc => {
@@ -64,12 +64,19 @@ export const teacherService = {
           finalGroup = oldData.group;
         }
 
+        // 🔥 BẢO TỒN SỐ ĐIỆN THOẠI: Trích xuất SĐT cũ để không bị ghi đè mất
+        let finalPhone = teacher.phone;
+        if (oldData && oldData.phone) {
+          finalPhone = oldData.phone;
+        }
+
         // 3. Ghi dữ liệu bằng SET MERGE (Không xóa cũ, chỉ cập nhật hoặc thêm mới)
         batch.set(docRef, {
           ...teacher,
           id: tId,
           name: finalName,
-          group: finalGroup
+          group: finalGroup,
+          phone: finalPhone // Ghi lại SĐT đã được bảo tồn
         }, { merge: true });
       });
 

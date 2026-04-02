@@ -3,7 +3,7 @@ import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
 import { Search, Calendar, Layers, UserCheck, Filter, Star, Phone, MessageCircle, Video, X, PhoneCall, Copy, Check, Download, Loader2, Image as ImageIcon } from 'lucide-react';
-import { toBlob } from 'html-to-image'; // 🔥 Sử dụng thư viện chuẩn từ trang Dạy Thay
+import { toBlob } from 'html-to-image'; 
 
 export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherName }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
@@ -18,17 +18,26 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
   const [selectedSlot, setSelectedSlot] = useState<Schedule | null>(null);
 
-  // 🔥 STATES CHO TÍNH NĂNG CHỤP ẢNH
+  // 🔥 STATES QUẢN LÝ QUY TRÌNH XUẤT ẢNH (2 BƯỚC AN TOÀN)
   const tkbRef = useRef<HTMLDivElement>(null);
   const contactsRef = useRef<HTMLDivElement>(null);
   
-  const [isCopyingTkb, setIsCopyingTkb] = useState(false);
+  const [tkbBlob, setTkbBlob] = useState<Blob | null>(null);
+  const [contactsBlob, setContactsBlob] = useState<Blob | null>(null);
+  
+  const [isGeneratingTkb, setIsGeneratingTkb] = useState(false);
+  const [isGeneratingContacts, setIsGeneratingContacts] = useState(false);
+  
   const [tkbCopySuccess, setTkbCopySuccess] = useState(false);
-  
-  const [isCopyingContacts, setIsCopyingContacts] = useState(false);
   const [contactsCopySuccess, setContactsCopySuccess] = useState(false);
-  
-  const [previewImage, setPreviewImage] = useState<{url: string, type: 'TKB'|'DanhBa'} | null>(null);
+
+  // Reset Blobs khi đổi lớp hoặc đổi phiên bản
+  useEffect(() => {
+    setTkbBlob(null);
+    setContactsBlob(null);
+    setTkbCopySuccess(false);
+    setContactsCopySuccess(false);
+  }, [selectedClass, selectedVersion]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -124,48 +133,78 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
   };
 
   // ============================================================================
-  // 🔥 THUẬT TOÁN CHỤP & COPY ẢNH ZALO
+  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC 1 - TẠO ẢNH BẢO TOÀN CHIỀU RỘNG
   // ============================================================================
-  const processImageCapture = async (ref: React.RefObject<HTMLDivElement>, type: 'TKB'|'DanhBa') => {
+  const generateImageBlob = async (ref: React.RefObject<HTMLDivElement>, type: 'TKB' | 'DanhBa') => {
     if (!ref.current) return;
     
-    if (type === 'TKB') setIsCopyingTkb(true);
-    else setIsCopyingContacts(true);
+    if (type === 'TKB') setIsGeneratingTkb(true);
+    else setIsGeneratingContacts(true);
 
     try {
-      // Đợi DOM ổn định
       await new Promise(resolve => setTimeout(resolve, 300)); 
       
+      // Lấy chiều rộng thực tế của nội dung bên trong (chống cắt ảnh trên điện thoại)
+      // Ép tối thiểu 800px để ảnh luôn to, rõ ràng
+      const scrollWidth = Math.max(ref.current.scrollWidth, 800);
+
       const blob = await toBlob(ref.current, {
         backgroundColor: '#ffffff',
-        pixelRatio: 2, // Xuất ảnh nét gấp đôi để gửi Zalo không bị vỡ
-        style: { transform: 'none', margin: '0' }
+        pixelRatio: 2, 
+        width: scrollWidth, // Ép camera phải rộng ra bằng scrollWidth
+        style: { 
+          transform: 'none', 
+          margin: '0',
+          width: `${scrollWidth}px`, // Ép phần tử con phải giãn ra hết cỡ
+          maxWidth: 'none'
+        }
       });
 
-      if (!blob) throw new Error("Dữ liệu ảnh rỗng.");
-
-      try {
-        const item = new ClipboardItem({ 'image/png': blob });
-        await navigator.clipboard.write([item]);
-        
-        if (type === 'TKB') { 
-          setTkbCopySuccess(true); 
-          setTimeout(() => setTkbCopySuccess(false), 3000); 
-        } else { 
-          setContactsCopySuccess(true); 
-          setTimeout(() => setContactsCopySuccess(false), 3000); 
-        }
-      } catch (clipErr) {
-        console.warn('Clipboard bị chặn, mở ảnh xem trước...', clipErr);
-        const url = URL.createObjectURL(blob);
-        setPreviewImage({ url, type });
+      if (blob) {
+        if (type === 'TKB') setTkbBlob(blob);
+        else setContactsBlob(blob);
+      } else {
+        throw new Error("Không thể trích xuất dữ liệu ảnh.");
       }
     } catch (err: any) {
-      alert(`Lỗi tạo ảnh: ${err.message}. Vui lòng tải lại trang và thử lại.`);
+      alert(`Lỗi tạo ảnh: ${err.message}`);
     } finally {
-      if (type === 'TKB') setIsCopyingTkb(false);
-      else setIsCopyingContacts(false);
+      if (type === 'TKB') setIsGeneratingTkb(false);
+      else setIsGeneratingContacts(false);
     }
+  };
+
+  // ============================================================================
+  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC 2 - COPY VÀO BỘ NHỚ TẠM
+  // ============================================================================
+  const handleCopyImage = async (blob: Blob, type: 'TKB' | 'DanhBa') => {
+    try {
+      const item = new ClipboardItem({ 'image/png': blob });
+      await navigator.clipboard.write([item]);
+      
+      if (type === 'TKB') {
+        setTkbCopySuccess(true);
+        setTimeout(() => setTkbCopySuccess(false), 3000);
+      } else {
+        setContactsCopySuccess(true);
+        setTimeout(() => setContactsCopySuccess(false), 3000);
+      }
+    } catch (error) {
+      console.error('Lỗi clipboard:', error);
+      alert("Trình duyệt hoặc điện thoại của bạn đang chặn chức năng Copy ảnh trực tiếp. Vui lòng sử dụng nút TẢI ẢNH XUỐNG bên cạnh nhé!");
+    }
+  };
+
+  // ============================================================================
+  // 🔥 QUY TRÌNH XUẤT ẢNH: BƯỚC DỰ PHÒNG - TẢI ẢNH XUỐNG
+  // ============================================================================
+  const handleDownloadImage = (blob: Blob, type: 'TKB' | 'DanhBa') => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = `${type}_Lop_${String(selectedClass).replace(/\./g, '_')}.png`;
+    link.href = url;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); 
   };
 
 
@@ -174,7 +213,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
     const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
     return (
-      <div className="overflow-x-auto mt-6 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10">
+      <div className="overflow-x-auto mt-4 bg-white rounded-xl shadow-sm border border-emerald-200 relative z-10 w-full">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-emerald-50/50">
             <tr>
@@ -186,7 +225,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {periods.map(period => (
-              <tr key={period} className={period === 5 ? 'border-b-4 border-gray-300' : ''}>
+              <tr key={period} className={period === 5 ? 'border-b-4 border-emerald-100' : ''}>
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-700 border-r bg-gray-50">
                   Tiết {period <= 5 ? period : period - 5} {period <= 5 ? '(Sáng)' : '(Chiều)'}
                 </td>
@@ -204,7 +243,7 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                       key={`${day}-${period}`} 
                       onClick={() => isClickable && setSelectedSlot(slot)}
                       className={`px-4 py-3 whitespace-nowrap text-sm text-center border-r transition-all
-                        ${slot ? 'bg-emerald-50' : 'bg-gray-100/50'}
+                        ${slot ? 'bg-emerald-50/40' : 'bg-gray-50/30'}
                         ${isClickable ? 'cursor-pointer hover:bg-emerald-100 hover:shadow-inner ring-1 ring-transparent hover:ring-emerald-300' : ''}
                       `}
                       title={isClickable ? 'Bấm để xem liên lạc Giáo viên' : ''}
@@ -215,9 +254,9 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
                           <span className="text-xs font-medium text-emerald-950 mt-1 flex items-center">
                             {slot.giao_vien}
                           </span>
-                          {hasRoom && <span className="text-[10px] text-gray-500 mt-0.5">P.{cleanPhong}</span>}
+                          {hasRoom && <span className="text-[10px] text-gray-500 mt-0.5 bg-white px-1.5 rounded border border-gray-200 shadow-sm">P.{cleanPhong}</span>}
                         </div>
-                      ) : <span className="text-gray-300 text-xs italic">Trống</span>}
+                      ) : <span className="text-gray-300 text-xs italic">-</span>}
                     </td>
                   );
                 })}
@@ -462,42 +501,88 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
         {selectedClass && (
           <div className="animate-in slide-in-from-right-4 duration-300 relative z-10">
             
-            {/* THIẾT LẬP THANH ĐIỀU KHIỂN & NÚT COPY */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+            {/* THIẾT LẬP THANH ĐIỀU KHIỂN & NÚT COPY KIỂU MỚI (2 BƯỚC) */}
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 bg-gray-50 p-3 rounded-xl border border-gray-200">
               <button 
                 onClick={() => setSelectedClass(null)}
-                className="text-sm text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-5 py-2.5 rounded-lg transition-colors font-bold shadow-sm whitespace-nowrap"
+                className="text-sm text-gray-700 hover:text-gray-900 bg-white border border-gray-300 hover:bg-gray-100 px-5 py-2.5 rounded-lg transition-colors font-bold shadow-sm whitespace-nowrap w-full lg:w-auto"
               >
-                ← Trở lại danh sách Lớp
+                ← Trở lại
               </button>
 
-              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                <button 
-                  onClick={() => processImageCapture(tkbRef, 'TKB')}
-                  disabled={isCopyingTkb || isCopyingContacts}
-                  className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-all disabled:opacity-80
-                    ${tkbCopySuccess ? 'bg-green-500 text-white border border-green-600' : 'bg-emerald-600 text-white border border-emerald-700 hover:bg-emerald-700'}
-                  `}
-                >
-                  {isCopyingTkb ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : (tkbCopySuccess ? <Check className="w-4 h-4 mr-2" /> : <ImageIcon className="w-4 h-4 mr-2" />)}
-                  {isCopyingTkb ? 'Đang tạo ảnh...' : (tkbCopySuccess ? 'Đã Copy xong!' : 'Copy ảnh TKB')}
-                </button>
+              <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                
+                {/* TOOL: ẢNH TKB */}
+                <div className="flex bg-white p-1 rounded-lg border border-emerald-200 shadow-sm w-full sm:w-auto">
+                  {!tkbBlob ? (
+                    <button 
+                      onClick={() => generateImageBlob(tkbRef, 'TKB')}
+                      disabled={isGeneratingTkb || isGeneratingContacts}
+                      className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-md text-sm font-bold transition-all disabled:opacity-50 flex justify-center items-center"
+                    >
+                      {isGeneratingTkb ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 mr-2" />}
+                      Tạo ảnh TKB
+                    </button>
+                  ) : (
+                    <div className="flex w-full animate-in fade-in zoom-in-95 duration-200">
+                      <button 
+                        onClick={() => handleCopyImage(tkbBlob, 'TKB')}
+                        className={`flex-1 px-4 py-2 rounded-l-md text-sm font-bold text-white transition-all flex justify-center items-center border-r border-green-600
+                          ${tkbCopySuccess ? 'bg-green-600' : 'bg-emerald-600 hover:bg-emerald-700'}
+                        `}
+                      >
+                        {tkbCopySuccess ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+                        {tkbCopySuccess ? 'Đã Copy TKB!' : 'Copy Zalo'}
+                      </button>
+                      <button 
+                        onClick={() => handleDownloadImage(tkbBlob, 'TKB')}
+                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-r-md transition-colors"
+                        title="Tải ảnh xuống"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-                <button 
-                  onClick={() => processImageCapture(contactsRef, 'DanhBa')}
-                  disabled={isCopyingTkb || isCopyingContacts}
-                  className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-all disabled:opacity-80
-                    ${contactsCopySuccess ? 'bg-green-500 text-white border border-green-600' : 'bg-[#0068FF] text-white border border-blue-700 hover:bg-blue-600'}
-                  `}
-                >
-                  {isCopyingContacts ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : (contactsCopySuccess ? <Check className="w-4 h-4 mr-2" /> : <PhoneCall className="w-4 h-4 mr-2" />)}
-                  {isCopyingContacts ? 'Đang tạo ảnh...' : (contactsCopySuccess ? 'Đã Copy xong!' : 'Copy ảnh Danh bạ')}
-                </button>
+                {/* TOOL: ẢNH DANH BẠ */}
+                <div className="flex bg-white p-1 rounded-lg border border-blue-200 shadow-sm w-full sm:w-auto">
+                  {!contactsBlob ? (
+                    <button 
+                      onClick={() => generateImageBlob(contactsRef, 'DanhBa')}
+                      disabled={isGeneratingTkb || isGeneratingContacts}
+                      className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 rounded-md text-sm font-bold transition-all disabled:opacity-50 flex justify-center items-center"
+                    >
+                      {isGeneratingContacts ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <PhoneCall className="w-4 h-4 mr-2" />}
+                      Tạo ảnh Danh bạ
+                    </button>
+                  ) : (
+                    <div className="flex w-full animate-in fade-in zoom-in-95 duration-200">
+                      <button 
+                        onClick={() => handleCopyImage(contactsBlob, 'DanhBa')}
+                        className={`flex-1 px-4 py-2 rounded-l-md text-sm font-bold text-white transition-all flex justify-center items-center border-r border-blue-700
+                          ${contactsCopySuccess ? 'bg-green-500' : 'bg-[#0068FF] hover:bg-blue-600'}
+                        `}
+                      >
+                        {contactsCopySuccess ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+                        {contactsCopySuccess ? 'Đã Copy Danh Bạ!' : 'Copy Zalo'}
+                      </button>
+                      <button 
+                        onClick={() => handleDownloadImage(contactsBlob, 'DanhBa')}
+                        className="px-3 py-2 bg-[#0068FF] hover:bg-blue-600 text-white rounded-r-md transition-colors"
+                        title="Tải ảnh xuống"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
               </div>
             </div>
 
             {/* KHUNG NÀY SẼ ĐƯỢC CHỤP ẢNH LẠI BẰNG HTML-TO-IMAGE - TKB */}
-            <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden">
+            <div ref={tkbRef} className="bg-white p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm relative overflow-hidden inline-block min-w-full">
               <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-[0.02] pointer-events-none">
                 <Calendar className="w-96 h-96" />
               </div>
@@ -535,44 +620,6 @@ export const ClassView: React.FC<{ teacherName?: string | null }> = ({ teacherNa
 
       {/* RENDER BẢNG ẨN SAU HẬU TRƯỜNG ĐỂ CHỤP ẢNH */}
       {renderHiddenContactsTemplate()}
-      
-      {/* Modal Fallback khi Trình duyệt chặn bộ nhớ tạm */}
-      {previewImage && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-gray-800 text-lg">📸 Ảnh {previewImage.type === 'TKB' ? 'Thời khóa biểu' : 'Danh bạ'} đã sẵn sàng!</h3>
-              <button onClick={() => setPreviewImage(null)} className="text-gray-500 hover:text-red-600 bg-gray-200 hover:bg-red-100 rounded-full p-1.5 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-4 bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-sm text-center shrink-0">
-              <span className="font-bold">Trình duyệt đã chặn chức năng Copy tự động.</span> Thầy/cô vui lòng 
-              <span className="font-bold text-red-600 uppercase mx-1">Nhấn chuột phải vào ảnh bên dưới</span> 
-              (hoặc nhấn giữ nếu dùng điện thoại) và chọn <span className="font-bold">"Sao chép hình ảnh"</span> để dán vào Zalo nhé.
-            </div>
-            
-            <div className="p-6 overflow-y-auto bg-gray-200 flex justify-center items-start flex-1">
-              <img src={previewImage.url} alt="Báo cáo" className="max-w-full h-auto border border-gray-300 shadow-md rounded bg-white" />
-            </div>
-            
-            <div className="p-4 border-t border-gray-100 bg-white flex justify-center shrink-0">
-              <button 
-                onClick={() => {
-                  const link = document.createElement('a');
-                  link.download = `${previewImage.type}_Lop_${String(selectedClass).replace(/\./g, '_')}.png`;
-                  link.href = previewImage.url;
-                  link.click();
-                }} 
-                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-indigo-700 flex items-center transition-colors shadow-sm"
-              >
-                <Download className="w-5 h-5 mr-2" /> Hoặc Tải ảnh xuống máy
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

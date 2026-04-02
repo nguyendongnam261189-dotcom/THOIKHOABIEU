@@ -15,6 +15,7 @@ export interface Teacher {
   subject: string;
   group: string;
   teachableSubjects?: string[];
+  phone?: string; // 🔥 Đã bổ sung trường lưu số điện thoại
 }
 
 export interface User {

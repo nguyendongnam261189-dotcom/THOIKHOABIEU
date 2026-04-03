@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { LayoutDashboard, Users, Presentation, BarChart3, Loader2, Search, Radar, Clock, Layers, Contact, Star } from 'lucide-react';
+import { LayoutDashboard, Users, Presentation, BarChart3, Loader2, Search, Radar, Clock, Layers, Contact, Star, Phone, MessageCircle, Video, X, PhoneCall } from 'lucide-react';
 
 export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttcm' | null, department?: string | null }> = ({ role, department }) => {
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
@@ -14,6 +14,9 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
+
+  // 🔥 STATE QUẢN LÝ CỬA SỔ LIÊN LẠC
+  const [selectedContactTeacher, setSelectedContactTeacher] = useState<Teacher | null>(null);
 
   // Vá lỗi "Lời nguyền Chủ Nhật": Thứ Chủ Nhật (0) sẽ tự động gán là Thứ 2.
   const getInitialDay = () => {
@@ -190,6 +193,84 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     }));
   }, [freeTeachers, department]);
 
+
+  // ======================================================================
+  // 🔥 HÀM TIỆN ÍCH CHO CỬA SỔ LIÊN LẠC
+  // ======================================================================
+  const formatZaloLink = (phone?: string) => {
+    if (!phone) return '#';
+    let cleanPhone = phone.replace(/[\s.-]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '84' + cleanPhone.substring(1);
+    }
+    return `https://zalo.me/${cleanPhone}`;
+  };
+
+  const handleTeacherClick = (teacherName: string) => {
+    const teacherInfo = teachers.find(t => t.name === teacherName);
+    if (teacherInfo) {
+      setSelectedContactTeacher(teacherInfo);
+    } else {
+      // Fallback nếu không tìm thấy (hiếm khi xảy ra)
+      setSelectedContactTeacher({ id: '', name: teacherName, group: 'Chưa cập nhật', phone: '' });
+    }
+  };
+
+  const renderContactModal = () => {
+    if (!selectedContactTeacher) return null;
+    const phone = selectedContactTeacher.phone;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onClick={() => setSelectedContactTeacher(null)}></div>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden relative z-10 animate-in zoom-in-95 duration-200">
+          
+          <div className="bg-gradient-to-r from-indigo-500 to-indigo-700 p-5 text-white text-center relative">
+            <button onClick={() => setSelectedContactTeacher(null)} className="absolute top-3 right-3 text-white/80 hover:text-white bg-black/10 hover:bg-black/20 rounded-full p-1.5 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center font-black text-3xl text-indigo-600 mx-auto mb-3 shadow-md">
+              {String(selectedContactTeacher.name).split(' ').pop()?.charAt(0).toUpperCase()}
+            </div>
+            <h3 className="text-xl font-bold">{selectedContactTeacher.name}</h3>
+            <p className="text-indigo-100 text-sm mt-1">{selectedContactTeacher.group || 'Giáo viên'}</p>
+          </div>
+
+          <div className="p-5">
+            <div className="flex items-center justify-center bg-gray-50 rounded-lg p-3 mb-5 border border-gray-100">
+              <PhoneCall className="w-4 h-4 text-gray-400 mr-2" />
+              <span className="font-bold text-gray-700 tracking-wider">
+                {phone ? phone : 'Chưa cập nhật SĐT'}
+              </span>
+            </div>
+
+            {phone ? (
+              <div className="grid grid-cols-3 gap-2">
+                <a href={`tel:${phone}`} className="flex flex-col items-center justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 py-3 rounded-xl transition-colors active:scale-95">
+                  <Phone className="w-6 h-6 mb-1.5" />
+                  <span className="text-[10px] font-bold uppercase">Gọi điện</span>
+                </a>
+                <a href={formatZaloLink(phone)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl transition-colors active:scale-95">
+                  <MessageCircle className="w-6 h-6 mb-1.5" />
+                  <span className="text-[10px] font-bold uppercase">Nhắn Zalo</span>
+                </a>
+                <a href={formatZaloLink(phone)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl transition-colors active:scale-95">
+                  <Video className="w-6 h-6 mb-1.5" />
+                  <span className="text-[10px] font-bold uppercase">Gọi Zalo</span>
+                </a>
+              </div>
+            ) : (
+              <div className="text-center text-sm text-gray-500 italic pb-2">
+                Không thể thực hiện cuộc gọi vì giáo viên này chưa cập nhật số điện thoại trên hệ thống.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+
   if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 text-indigo-600 animate-spin" /></div>;
 
   return (
@@ -261,7 +342,12 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           
           <div className="flex-1 overflow-y-auto border-x border-b border-gray-200 rounded-b-lg divide-y divide-gray-100">
             {filteredHomerooms.length > 0 ? filteredHomerooms.map((item, index) => (
-              <div key={item.className} className="flex items-center px-4 py-3 hover:bg-indigo-50/50 transition-colors">
+              <div 
+                key={item.className} 
+                className="flex items-center px-4 py-3 hover:bg-indigo-50/50 transition-colors cursor-pointer"
+                onClick={() => handleTeacherClick(item.teacherName)}
+                title="Bấm để xem liên lạc"
+              >
                 <div className="w-8 text-center text-sm text-gray-400">{index + 1}</div>
                 <div className="w-20 px-2 text-center font-extrabold text-indigo-600 text-sm">
                   <span className="bg-white border border-indigo-200 px-2 py-1 rounded shadow-sm">{item.className}</span>
@@ -319,7 +405,12 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
                 
                 <div className="divide-y divide-emerald-50 border-b border-emerald-100">
                   {group.teachers.map(t => (
-                    <div key={t.name} className={`flex items-center justify-between px-4 py-2.5 transition-colors ${group.isMyDept ? 'bg-amber-50/30 hover:bg-amber-50' : 'bg-white hover:bg-emerald-50'}`}>
+                    <div 
+                      key={t.name} 
+                      className={`flex items-center justify-between px-4 py-2.5 transition-colors cursor-pointer ${group.isMyDept ? 'bg-amber-50/30 hover:bg-amber-50' : 'bg-white hover:bg-emerald-50'}`}
+                      onClick={() => handleTeacherClick(t.name)}
+                      title="Bấm để xem liên lạc"
+                    >
                       <div className="font-bold text-gray-800 text-sm pl-2">{t.name}</div>
                       <div className={`flex items-center font-bold px-2.5 py-1 rounded text-sm shadow-sm ${group.isMyDept ? 'text-amber-800 bg-amber-100' : 'text-emerald-700 bg-emerald-100'}`}>
                         <Clock className="w-3.5 h-3.5 mr-1" />{t.load}
@@ -336,6 +427,10 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           </div>
         </div>
       </div>
+      
+      {/* GỌI RENDER MODAL Ở CUỐI CÙNG */}
+      {renderContactModal()}
+      
     </div>
   );
 };

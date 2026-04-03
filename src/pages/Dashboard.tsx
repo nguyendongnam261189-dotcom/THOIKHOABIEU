@@ -11,14 +11,14 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDept, setFilterDept] = useState('');
+  // 🔥 BỔ SUNG STATE CHO BỘ LỌC KHỐI
+  const [filterGrade, setFilterGrade] = useState('');
 
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
 
-  // 🔥 STATE QUẢN LÝ CỬA SỔ LIÊN LẠC
   const [selectedContactTeacher, setSelectedContactTeacher] = useState<Teacher | null>(null);
 
-  // Vá lỗi "Lời nguyền Chủ Nhật": Thứ Chủ Nhật (0) sẽ tự động gán là Thứ 2.
   const getInitialDay = () => {
     const today = new Date().getDay();
     return today === 0 ? 2 : today + 1;
@@ -46,7 +46,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           setSelectedVersion(uniqueVersions[0]);
         }
 
-        // TẤT CẢ VAI TRÒ ĐỀU THẤY TOÀN BỘ GIÁO VIÊN
         setTeachers(allTeachers);
 
       } catch (error) {
@@ -58,15 +57,11 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     fetchData();
   }, []);
 
-  // TẤT CẢ VAI TRÒ ĐỀU THẤY TOÀN BỘ LỊCH DẠY CỦA PHIÊN BẢN ĐANG CHỌN
   const schedules = useMemo(() => {
     return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
   }, [allSchedules, selectedVersion]);
 
 
-  // =====================================================================
-  // 🔥 LỌC RA NHỮNG GIÁO VIÊN "CÓ HOẠT ĐỘNG" TRONG TKB NÀY (LOẠI BỎ NGƯỜI NGHỈ HƯU)
-  // =====================================================================
   const activeTeachers = useMemo(() => {
     const namesInCurrentSchedule = new Set(schedules.map(s => s.giao_vien));
     
@@ -77,7 +72,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
   }, [schedules, teachers]);
 
 
-  // 🔥 Các bộ lọc Tổ và Radar bây giờ chỉ lấy thông tin từ "activeTeachers"
   const dynamicDepartments = useMemo(() => {
     return Array.from(new Set(activeTeachers.map(t => t.group))).filter(Boolean).sort();
   }, [activeTeachers]);
@@ -92,7 +86,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       loadMap.set(s.giao_vien, (loadMap.get(s.giao_vien) || 0) + 1);
     });
 
-    // 🔥 Dùng activeTeachers thay vì teachers toàn trường
     const teacherLoads = activeTeachers
       .map(t => ({
         name: t.name,
@@ -136,19 +129,27 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     return result.sort((a, b) => a.className.localeCompare(b.className, 'vi', { numeric: true }));
   }, [schedules, teachers]);
 
+  // 🔥 TỰ ĐỘNG TẠO DANH SÁCH CÁC KHỐI DỰA TRÊN TÊN LỚP (Ví dụ: 6/1 -> Khối 6)
+  const dynamicGrades = useMemo(() => {
+    const grades = new Set(homeroomData.map(item => item.className.split(/[./]/)[0]));
+    return Array.from(grades).filter(Boolean).sort((a, b) => Number(a) - Number(b));
+  }, [homeroomData]);
+
+  // 🔥 CẬP NHẬT THUẬT TOÁN LỌC: BỔ SUNG LỌC THEO KHỐI
   const filteredHomerooms = useMemo(() => {
     return homeroomData.filter(item => {
       const matchSearch = item.className.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           item.teacherName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchDept = filterDept ? item.group === filterDept : true;
-      return matchSearch && matchDept;
+      
+      const grade = item.className.split(/[./]/)[0];
+      const matchGrade = filterGrade ? grade === filterGrade : true;
+
+      return matchSearch && matchDept && matchGrade;
     });
-  }, [homeroomData, searchQuery, filterDept]);
+  }, [homeroomData, searchQuery, filterDept, filterGrade]);
 
 
-  // ======================================================================
-  // 🔥 RADAR TÌM GIÁO VIÊN TRỐNG (TỰ ĐỘNG CHỈ LẤY ACTIVE TEACHERS THÔNG QUA BASESTATS)
-  // ======================================================================
   const freeTeachers = useMemo(() => {
     if (!baseStats) return [];
     
@@ -169,7 +170,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       .sort((a, b) => a.load - b.load);
   }, [schedules, baseStats, radarDay, radarSession, radarPeriod, radarDept]);
 
-  // THUẬT TOÁN GHIM TỔ CỦA USER LÊN ĐẦU (PIN TO TOP)
   const groupedFreeTeachers = useMemo(() => {
     const groups: Record<string, typeof freeTeachers> = {};
     freeTeachers.forEach(t => {
@@ -179,24 +179,19 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     });
     
     return Object.keys(groups).sort((a, b) => {
-      // 1. Nếu user có tổ, đưa tổ đó lên trên cùng
       if (department) {
         if (a === department) return -1;
         if (b === department) return 1;
       }
-      // 2. Các tổ còn lại sắp xếp theo ABC
       return a.localeCompare(b, 'vi');
     }).map(groupName => ({
       group: groupName,
       teachers: groups[groupName],
-      isMyDept: groupName === department // Cờ đánh dấu để tô màu UI
+      isMyDept: groupName === department
     }));
   }, [freeTeachers, department]);
 
 
-  // ======================================================================
-  // 🔥 HÀM TIỆN ÍCH CHO CỬA SỔ LIÊN LẠC
-  // ======================================================================
   const formatZaloLink = (phone?: string) => {
     if (!phone) return '#';
     let cleanPhone = phone.replace(/[\s.-]/g, '');
@@ -211,7 +206,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
     if (teacherInfo) {
       setSelectedContactTeacher(teacherInfo);
     } else {
-      // Fallback nếu không tìm thấy (hiếm khi xảy ra)
       setSelectedContactTeacher({ id: '', name: teacherName, group: 'Chưa cập nhật', phone: '' });
     }
   };
@@ -303,7 +297,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-xl shadow-sm border border-indigo-100 flex items-center space-x-4">
           <div className="bg-indigo-100 p-3 rounded-full text-indigo-600"><Users className="w-6 h-6" /></div>
-          {/* 🔥 SỐ LƯỢNG GIÁO VIÊN GIỜ ĐÂY CHỈ HIỂN THỊ ACTIVE TEACHERS */}
           <div><p className="text-xs font-medium text-gray-500 uppercase">Giáo viên</p><p className="text-2xl font-extrabold text-indigo-950">{activeTeachers.length}</p></div>
         </div>
         <div className="bg-white p-5 rounded-xl shadow-sm border border-sky-100 flex items-center space-x-4">
@@ -323,15 +316,23 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
           <div className="flex items-center mb-5 border-b pb-3 border-gray-100">
             <Contact className="w-5 h-5 mr-2 text-indigo-500"/><h3 className="text-lg font-bold text-gray-900">Danh bạ Giáo viên Chủ nhiệm</h3>
           </div>
-          <div className="flex gap-3 mb-4">
+          
+          {/* 🔥 KHU VỰC TÌM KIẾM VÀ LỌC ĐÃ ĐƯỢC BỔ SUNG LỌC THEO KHỐI */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <input type="text" placeholder="Gõ tên lớp (VD: 6/11) hoặc Tên GV..." className="pl-9 pr-3 py-2 w-full border border-gray-300 rounded-lg text-sm" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
-            <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
-              <option value="">Toàn trường</option>
-              {dynamicDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
-            </select>
+            <div className="flex gap-2">
+              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32 outline-none focus:ring-2 focus:ring-indigo-500" value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
+                <option value="">Tất cả khối</option>
+                {dynamicGrades.map(grade => <option key={grade} value={grade}>Khối {grade}</option>)}
+              </select>
+              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-36 outline-none focus:ring-2 focus:ring-indigo-500" value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
+                <option value="">Tất cả tổ</option>
+                {dynamicDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+              </select>
+            </div>
           </div>
           
           <div className="bg-indigo-50 px-4 py-2 rounded-t-lg border border-indigo-100 flex items-center text-xs font-bold text-indigo-700 uppercase">
@@ -428,7 +429,6 @@ export const Dashboard: React.FC<{ role?: 'admin' | 'manager' | 'teacher' | 'ttc
         </div>
       </div>
       
-      {/* GỌI RENDER MODAL Ở CUỐI CÙNG */}
       {renderContactModal()}
       
     </div>

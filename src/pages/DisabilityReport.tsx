@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2 } from 'lucide-react';
-import { Schedule } from '../types';
+import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
+import { teacherService } from '../services/teacherService';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
@@ -13,9 +14,10 @@ interface DisabledStudent {
 
 export const DisabilityReport: React.FC = () => {
   // =====================================================================
-  // 1. STATE QUẢN LÝ DỮ LIỆU TKB
+  // 1. STATE QUẢN LÝ DỮ LIỆU TKB VÀ GIÁO VIÊN
   // =====================================================================
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [versions, setVersions] = useState<{ name: string, weeks: number }[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -24,11 +26,13 @@ export const DisabilityReport: React.FC = () => {
     const loadData = async () => {
       setLoadingData(true);
       try {
-        const [schedules, configs] = await Promise.all([
+        const [schedules, configs, allTeachers] = await Promise.all([
           scheduleService.getAllSchedules(),
-          scheduleService.getVersionConfigs()
+          scheduleService.getVersionConfigs(),
+          teacherService.getAllTeachers()
         ]);
         setAllSchedules(schedules);
+        setTeachers(allTeachers);
         
         const names = Array.from(new Set(schedules.map(s => s.versionName || 'Mặc định'))).sort();
         const vs = names.map(n => {
@@ -46,6 +50,11 @@ export const DisabilityReport: React.FC = () => {
   }, []);
 
   const allClassNames = Array.from(new Set(allSchedules.map(s => s.lop?.split(',')[0].trim()))).filter(Boolean).sort();
+  
+  // Tự động lấy danh sách Tổ chuyên môn từ dữ liệu giáo viên
+  const dynamicDepartments = useMemo(() => {
+    return Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort();
+  }, [teachers]);
 
   // =====================================================================
   // 2. STATE CẤU HÌNH BÁO CÁO (LINH HOẠT THEO MẪU 1)
@@ -64,6 +73,9 @@ export const DisabilityReport: React.FC = () => {
   const [students, setStudents] = useState<DisabledStudent[]>([]);
   const [newClass, setNewClass] = useState('');
   const [newName, setNewName] = useState('');
+  
+  // 🔥 STATE CHO BỘ LỌC TỔ CHUYÊN MÔN KHI XUẤT
+  const [selectedExportDept, setSelectedExportDept] = useState<string>('');
 
   const handleAddStudent = () => {
     if (!newClass.trim() || !newName.trim()) {
@@ -85,7 +97,7 @@ export const DisabilityReport: React.FC = () => {
   };
 
   // =====================================================================
-  // 3. THUẬT TOÁN XUẤT EXCEL MẪU 1 (CO GIÃN CỘT THÔNG MINH)
+  // 3. THUẬT TOÁN XUẤT EXCEL MẪU 1 (CÓ LỌC THEO TỔ)
   // =====================================================================
   const handleExportExcel = async () => {
     if (students.length === 0) {
@@ -98,7 +110,6 @@ export const DisabilityReport: React.FC = () => {
       const wb = new ExcelJS.Workbook();
       wb.creator = 'TKB Manager';
       
-      // Tính toán mảng các tháng cần hiển thị
       const months: number[] = [];
       if (config.startMonth <= config.endMonth) {
         for (let i = config.startMonth; i <= config.endMonth; i++) months.push(i);
@@ -107,10 +118,9 @@ export const DisabilityReport: React.FC = () => {
         for (let i = 1; i <= config.endMonth; i++) months.push(i);
       }
 
-      const M = months.length; // Số lượng cột tháng
-      const TOTAL_COLS = 4 + M + 2; // (STT, Lớp, Tên, Môn) + (Tháng...) + (Tổng, Ghi chú)
+      const M = months.length; 
+      const TOTAL_COLS = 4 + M + 2; 
 
-      // Gom dữ liệu theo từng Giáo viên
       const tMap = new Map<string, { subjects: Set<string>, records: any[], totalPeriods: number }>();
 
       students.forEach(student => {
@@ -135,7 +145,7 @@ export const DisabilityReport: React.FC = () => {
             const vSchedules = classSchedules.filter(s => s.versionName === v.name && s.giao_vien === combo.teacher);
             
             if (combo.subject === 'HĐTN') {
-              count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; // Giữ nguyên thuật toán 3 tiết HĐTN
+              count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; 
             } else {
               count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
             }
@@ -173,12 +183,20 @@ export const DisabilityReport: React.FC = () => {
         return;
       }
 
+      let exportedCount = 0;
+
       // VẼ EXCEL CHO TỪNG GIÁO VIÊN
       tMap.forEach((tData, teacherName) => {
+        // 🔥 LỌC THEO TỔ CHUYÊN MÔN
+        const teacherInfo = teachers.find(t => t.name === teacherName);
+        const tGroup = teacherInfo?.group || 'Chung';
+        if (selectedExportDept && tGroup !== selectedExportDept) return; // Bỏ qua nếu không đúng Tổ đã chọn
+
+        exportedCount++;
+
         const safeName = teacherName.substring(0, 31).replace(/[\\/?*\[\]]/g, '');
         const ws = wb.addWorksheet(safeName);
 
-        // Cài đặt trang A4 in ngang (Mẫu bảng nhiều cột nên in ngang Landscape cho đẹp)
         ws.pageSetup = {
           paperSize: 9, 
           orientation: 'landscape',
@@ -188,7 +206,6 @@ export const DisabilityReport: React.FC = () => {
           margins: { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
         };
 
-        // Hàm tiện ích lấy tên cột Excel (VD: 1->A, 2->B...)
         const getColLetter = (colIndex: number) => {
           let temp = colIndex;
           let letter = '';
@@ -203,22 +220,19 @@ export const DisabilityReport: React.FC = () => {
         const END_COL = getColLetter(TOTAL_COLS);
         const MONTH_END_COL = getColLetter(4 + M);
 
-        // Cài đặt độ rộng cột
-        ws.getColumn(1).width = 6;  // STT
-        ws.getColumn(2).width = 12; // Lớp
-        ws.getColumn(3).width = 25; // Tên HS
-        ws.getColumn(4).width = 15; // Môn
-        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 10; // Các tháng
-        ws.getColumn(TOTAL_COLS - 1).width = 15; // Cột Tổng
-        ws.getColumn(TOTAL_COLS).width = 20;     // Cột Ghi chú
+        ws.getColumn(1).width = 6;  
+        ws.getColumn(2).width = 12; 
+        ws.getColumn(3).width = 25; 
+        ws.getColumn(4).width = 15; 
+        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 10; 
+        ws.getColumn(TOTAL_COLS - 1).width = 15; 
+        ws.getColumn(TOTAL_COLS).width = 20;     
 
         let r = 1;
-        // Header Trái
         ws.mergeCells(`A${r}:C${r}`);
         ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH';
         ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         
-        // Header Phải
         ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`);
         ws.getCell(`D${r}`).value = 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM';
         ws.getCell(`D${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
@@ -243,7 +257,6 @@ export const DisabilityReport: React.FC = () => {
         ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
 
-        // Tiêu đề báo cáo
         ws.mergeCells(`A${r}:${END_COL}${r}`);
         ws.getCell(`A${r}`).value = 'BẢNG KÊ KHAI SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT';
         ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 };
@@ -256,7 +269,6 @@ export const DisabilityReport: React.FC = () => {
         ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
 
-        // Thông tin Giáo viên
         ws.mergeCells(`A${r}:${END_COL}${r}`);
         ws.getCell(`A${r}`).value = `Giáo viên giảng dạy: ${teacherName}`;
         ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
@@ -266,7 +278,6 @@ export const DisabilityReport: React.FC = () => {
         ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
 
-        // DÒNG TIÊU ĐỀ BẢNG THỐNG KÊ (Dòng 10 & 11)
         ws.mergeCells(`A${r}:A${r+1}`); ws.getCell(`A${r}`).value = 'STT';
         ws.mergeCells(`B${r}:B${r+1}`); ws.getCell(`B${r}`).value = 'Lớp có\nHSKT';
         ws.mergeCells(`C${r}:C${r+1}`); ws.getCell(`C${r}`).value = 'Họ và tên học sinh khuyết tật';
@@ -286,7 +297,6 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`${END_COL}${r}:${END_COL}${r+1}`);
         ws.getCell(`${END_COL}${r}`).value = 'Ghi chú\n(Công thức)';
 
-        // Format Header
         for(let i=1; i<=TOTAL_COLS; i++) {
           const cTop = ws.getCell(`${getColLetter(i)}${r}`);
           const cBot = ws.getCell(`${getColLetter(i)}${r+1}`);
@@ -298,7 +308,6 @@ export const DisabilityReport: React.FC = () => {
         }
         r += 2;
 
-        // DỮ LIỆU TỪNG HỌC SINH
         tData.records.forEach((rec, idx) => {
           const row = ws.getRow(r);
           row.height = 30;
@@ -307,11 +316,8 @@ export const DisabilityReport: React.FC = () => {
           row.getCell(3).value = rec.studentName;
           row.getCell(4).value = rec.subject;
           
-          // Các tháng để trống cho GV điền tay (vì TKB không map theo tháng)
-          // Đẩy tổng số tiết vào cột Tổng
           row.getCell(TOTAL_COLS - 1).value = rec.totalP;
           row.getCell(TOTAL_COLS - 1).font = { bold: true, color: { argb: 'FF0000' } };
-          
           row.getCell(TOTAL_COLS).value = rec.formula;
 
           for(let i=1; i<=TOTAL_COLS; i++) {
@@ -323,7 +329,6 @@ export const DisabilityReport: React.FC = () => {
           r++;
         });
 
-        // DÒNG TỔNG CỘNG CHÂN BẢNG
         ws.mergeCells(`A${r}:${MONTH_END_COL}${r}`);
         ws.getCell(`A${r}`).value = 'TỔNG CỘNG SỐ TIẾT DẠY';
         ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
@@ -338,7 +343,6 @@ export const DisabilityReport: React.FC = () => {
         }
         r += 2;
 
-        // PHẦN CHỮ KÝ
         ws.mergeCells(`A${r}:C${r}`);
         ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN';
         ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
@@ -356,7 +360,6 @@ export const DisabilityReport: React.FC = () => {
         ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' };
         r++;
 
-        // Chia đều 4 chữ ký
         const sigSpan = Math.max(2, Math.floor(TOTAL_COLS / 4));
         
         ws.mergeCells(r, 1, r, sigSpan);
@@ -375,14 +378,12 @@ export const DisabilityReport: React.FC = () => {
         ws.getCell(r, sigSpan * 3 + 1).value = 'Người kê khai';
         ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
         
-        // Font in đậm cho hàng chức danh
         for(let i=1; i<=TOTAL_COLS; i++) {
           const c = ws.getCell(r, i);
           if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 };
         }
         r += 4;
 
-        // Điền tên
         ws.mergeCells(r, 1, r, sigSpan);
         ws.getCell(r, 1).value = config.ttcm;
         ws.getCell(r, 1).alignment = { horizontal: 'center' };
@@ -406,9 +407,18 @@ export const DisabilityReport: React.FC = () => {
 
       });
 
+      // Kiểm tra nếu lọc xong mà không có sheet nào được tạo
+      if (exportedCount === 0) {
+        alert(`Không có giáo viên nào thuộc Tổ "${selectedExportDept}" có dạy các lớp khuyết tật đã chọn!`);
+        setIsExporting(false);
+        return;
+      }
+
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `Bao_Cao_Khuyet_Tat_${config.semester}_${config.schoolYear}.xlsx`);
+      
+      const fileName = `Bao_Cao_Khuyet_Tat_${selectedExportDept ? selectedExportDept.replace(/\s+/g, '_') : 'Toan_Truong'}_HK${config.semester}.xlsx`;
+      saveAs(blob, fileName);
 
     } catch (error) {
       console.error(error);
@@ -548,16 +558,31 @@ export const DisabilityReport: React.FC = () => {
               </table>
             </div>
             
-            <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between">
-              <div className="text-sm text-gray-500">Tổng cộng: <strong className="text-indigo-600">{students.length}</strong> học sinh</div>
-              <button 
-                onClick={handleExportExcel}
-                disabled={students.length === 0 || isExporting}
-                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-lg flex items-center text-base font-bold transition-colors shadow-sm"
-              >
-                {isExporting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}
-                {isExporting ? 'Đang tạo Excel...' : 'Xuất Báo Cáo Excel (Mẫu 1)'}
-              </button>
+            {/* 🔥 KHU VỰC NÚT XUẤT ĐÃ CÓ BỘ LỌC TỔ CHUYÊN MÔN */}
+            <div className="mt-6 pt-5 border-t border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="text-sm text-gray-500">
+                Tổng cộng: <strong className="text-indigo-600">{students.length}</strong> học sinh
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                <select 
+                  className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full sm:w-56 shadow-sm"
+                  value={selectedExportDept}
+                  onChange={(e) => setSelectedExportDept(e.target.value)}
+                >
+                  <option value="">Xuất Tất cả các Tổ</option>
+                  {dynamicDepartments.map(d => <option key={d} value={d}>Chỉ xuất Tổ {d}</option>)}
+                </select>
+
+                <button 
+                  onClick={handleExportExcel}
+                  disabled={students.length === 0 || isExporting || versions.every(v => v.weeks === 0)}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-xl flex items-center justify-center text-base font-bold transition-colors shadow-sm w-full sm:w-auto"
+                >
+                  {isExporting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}
+                  {isExporting ? 'Đang tạo Excel...' : 'Xuất Báo Cáo (Mẫu 1)'}
+                </button>
+              </div>
             </div>
 
           </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle } from 'lucide-react';
+import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle, Upload, Save } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
@@ -117,6 +117,75 @@ export const DisabilityReport: React.FC = () => {
   const handleRemoveStudent = (id: string) => {
     setStudents(students.filter(s => s.id !== id));
   };
+
+  // 🔥 TÍNH NĂNG MỚI: XUẤT VÀ NHẬP DANH SÁCH HỌC SINH BẰNG EXCEL
+  const handleBackupStudents = async () => {
+    if (students.length === 0) return;
+    try {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('DanhSachHSKT');
+      
+      ws.columns = [
+        { header: 'Lớp', key: 'class', width: 15 },
+        { header: 'Họ và tên học sinh khuyết tật', key: 'name', width: 40 }
+      ];
+      
+      ws.getRow(1).font = { bold: true, name: 'Times New Roman', size: 12 };
+      
+      students.forEach(s => {
+        ws.addRow({ class: s.className, name: s.studentName });
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Danh_Sach_HSKT_HK${config.semester}_${config.schoolYear}.xlsx`);
+    } catch (error) {
+      console.error(error);
+      alert("Lỗi khi xuất file danh sách!");
+    }
+  };
+
+  const handleRestoreStudents = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await file.arrayBuffer());
+      const ws = wb.worksheets[0];
+      
+      if (!ws) throw new Error("File Excel không hợp lệ");
+
+      const importedStudents: DisabledStudent[] = [];
+      ws.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) { // Bỏ qua dòng tiêu đề
+          const className = row.getCell(1).text?.trim();
+          const studentName = row.getCell(2).text?.trim();
+          if (className && studentName) {
+            importedStudents.push({
+              id: Date.now().toString() + Math.random().toString(36).substring(7),
+              className,
+              studentName
+            });
+          }
+        }
+      });
+
+      if (importedStudents.length > 0) {
+        setStudents(importedStudents); // Ghi đè danh sách hiện tại
+        alert(`Đã tải thành công ${importedStudents.length} học sinh từ file Excel!`);
+      } else {
+        alert("Không tìm thấy dữ liệu hợp lệ trong file Excel. Vui lòng kiểm tra lại cấu trúc cột.");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Lỗi khi đọc file Excel!");
+    } finally {
+      // Reset ô chọn file để có thể chọn lại file đó nếu cần
+      e.target.value = '';
+    }
+  };
+
 
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
@@ -470,37 +539,25 @@ export const DisabilityReport: React.FC = () => {
 
       // ================= ĐIỀU HƯỚNG LOGIC XUẤT (LỌC HAY TOÀN TRƯỜNG) =================
       if (selectedExportDept) {
-        // TRƯỜNG HỢP 1: LỌC MỘT TỔ CỤ THỂ
         const dData = deptDataMap.get(selectedExportDept);
         if (!dData) {
           alert(`Không có giáo viên nào thuộc Tổ "${selectedExportDept}" có dạy lớp khuyết tật!`);
           setIsExporting(false); return;
         }
-
-        // Tạo 1 Sheet Tổng hợp của Tổ lên đầu
         createSummarySheet(`TH - ${selectedExportDept}`, `TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TỔ ${selectedExportDept.toUpperCase()}`, 'Họ và tên giáo viên', dData.teachers, 'TỔNG CỘNG TOÀN TỔ', dData.totalPeriods);
-
-        // Tạo N Sheet Chi tiết cho từng Giáo viên trong Tổ đó
         dData.teachers.forEach(t => {
           const tData = teacherDataMap.get(t.name)!;
           createIndividualSheet(t.name, tData);
         });
-
       } else {
-        // TRƯỜNG HỢP 2: XUẤT TẤT CẢ (TOÀN TRƯỜNG) - BÁO CÁO TỔNG QUAN DÀNH CHO BGH
         if (deptDataMap.size === 0) { alert("Không có dữ liệu!"); setIsExporting(false); return; }
-
-        // Tạo 1 Sheet Tổng hợp Toàn trường lên đầu
         const schoolRows = Array.from(deptDataMap.entries()).map(([dName, data]) => ({ name: `Tổ ${dName}`, total: data.totalPeriods }));
         createSummarySheet('TH - TOÀN TRƯỜNG', 'TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TOÀN TRƯỜNG', 'Tổ chuyên môn', schoolRows, 'TỔNG CỘNG TOÀN TRƯỜNG', grandTotal);
-
-        // Tạo M Sheet Tổng hợp cho từng Tổ
         deptDataMap.forEach((data, deptName) => {
           createSummarySheet(`TH - ${deptName}`, `TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TỔ ${deptName.toUpperCase()}`, 'Họ và tên giáo viên', data.teachers, 'TỔNG CỘNG TOÀN TỔ', data.totalPeriods);
         });
       }
 
-      // Lưu file Excel
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const fileName = `Bao_Cao_Khuyet_Tat_${selectedExportDept ? selectedExportDept.replace(/\s+/g, '_') : 'Toan_Truong'}_HK${config.semester}.xlsx`;
@@ -697,6 +754,23 @@ export const DisabilityReport: React.FC = () => {
               <button onClick={handleAddStudent} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center text-sm font-bold transition-colors">
                 <Plus className="w-4 h-4 mr-1" /> Thêm
               </button>
+            </div>
+
+            <div className="flex items-center justify-between mb-3 mt-4">
+              <h4 className="text-sm font-bold text-gray-700">Danh sách đã thêm ({students.length})</h4>
+              <div className="flex gap-2">
+                <label className="cursor-pointer flex items-center px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-md text-xs font-bold transition-colors border border-indigo-100">
+                  <Upload className="w-3.5 h-3.5 mr-1" /> Nhập từ file
+                  <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleRestoreStudents} />
+                </label>
+                <button 
+                  onClick={handleBackupStudents}
+                  disabled={students.length === 0}
+                  className="flex items-center px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs font-bold transition-colors border border-emerald-100"
+                >
+                  <Save className="w-3.5 h-3.5 mr-1" /> Lưu danh sách
+                </button>
+              </div>
             </div>
 
             <div className="border border-gray-200 rounded-lg overflow-hidden">

@@ -34,7 +34,6 @@ export const DisabilityReport: React.FC = () => {
         setAllSchedules(schedules);
         setTeachers(allTeachers);
         
-        // Lấy danh sách version và số tuần cấu hình từ AdminDashboard để đối chiếu
         const names = Array.from(new Set(schedules.map(s => s.versionName || 'Mặc định'))).sort();
         const vs = names.map(n => {
           const cfg = configs.find(c => c.versionName === n);
@@ -124,7 +123,6 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
-  // Hàm tìm GVCN của một lớp
   const getHomeroomTeacher = (className: string): string | null => {
     const hrSchedule = allSchedules.find(s => 
       s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon)
@@ -133,7 +131,7 @@ export const DisabilityReport: React.FC = () => {
   };
 
   // =====================================================================
-  // 3. THUẬT TOÁN XUẤT EXCEL (TÍNH MA TRẬN & CỘNG 1 TIẾT CHO GVCN)
+  // 3. THUẬT TOÁN XUẤT EXCEL: TỔNG HỢP VÀ CHI TIẾT
   // =====================================================================
   const handleExportExcel = async () => {
     if (students.length === 0) {
@@ -149,12 +147,14 @@ export const DisabilityReport: React.FC = () => {
       const M = months.length; 
       const TOTAL_COLS = 4 + M + 2; 
 
-      const tMap = new Map<string, { subjects: Set<string>, records: any[], totalPeriods: number }>();
+      // BIẾN LƯU TRỮ DỮ LIỆU
+      const teacherDataMap = new Map<string, { dept: string, subjects: Set<string>, records: any[], totalPeriods: number }>();
+      const deptDataMap = new Map<string, { totalPeriods: number, teachers: { name: string, total: number }[] }>();
+      let grandTotal = 0;
 
+      // 1. TÍNH TOÁN DỮ LIỆU CHO TẤT CẢ GIÁO VIÊN
       students.forEach(student => {
         const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(student.className));
-        
-        // Bản đồ chứa cặp [Giáo viên - Môn học]
         const tsMap = new Map<string, { teacher: string, subject: string }>();
         
         classSchedules.forEach(s => {
@@ -164,30 +164,25 @@ export const DisabilityReport: React.FC = () => {
           if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
         });
 
-        // 🔥 LOGIC MỚI: TÌM GVCN VÀ TỰ ĐỘNG THÊM MÔN "CÔNG TÁC GVCN"
+        // Gán tự động môn GVCN
         const gvcn = getHomeroomTeacher(student.className);
         if (gvcn) {
           const gvcnKey = `${gvcn}|Công tác GVCN`;
-          if (!tsMap.has(gvcnKey)) {
-            tsMap.set(gvcnKey, { teacher: gvcn, subject: 'Công tác GVCN' });
-          }
+          if (!tsMap.has(gvcnKey)) tsMap.set(gvcnKey, { teacher: gvcn, subject: 'Công tác GVCN' });
         }
 
         tsMap.forEach(combo => {
-          const monthlyData: Record<number, number> = {};
-          const formulaParts: string[] = [];
+          const monthlyDetails: Record<number, Record<number, number>> = {};
           let totalP = 0;
 
           versions.forEach(v => {
             const vName = v.name;
             const matrixV = weekMatrix[vName] || {};
             let count = 0; 
-            
             const vSchedules = classSchedules.filter(s => s.versionName === vName && s.giao_vien === combo.teacher);
             
-            // Gán số tiết dạy mỗi tuần
             if (combo.subject === 'Công tác GVCN') {
-              count = 1; // GVCN luôn được tính 1 tiết/tuần
+              count = 1; 
             } else if (combo.subject === 'HĐTN') {
               count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; 
             } else {
@@ -199,21 +194,22 @@ export const DisabilityReport: React.FC = () => {
               months.forEach(m => {
                 const w = matrixV[m] || 0;
                 if (w > 0) {
-                  monthlyData[m] = (monthlyData[m] || 0) + (count * w);
+                  if (!monthlyDetails[m]) monthlyDetails[m] = {};
+                  monthlyDetails[m][count] = (monthlyDetails[m][count] || 0) + w;
                   vWeeks += w;
                 }
               });
 
-              if (vWeeks > 0) {
-                totalP += count * vWeeks;
-                formulaParts.push(`${vName}: ${count}t x ${vWeeks} tuần`);
-              }
+              if (vWeeks > 0) totalP += count * vWeeks;
             }
           });
 
           if (totalP > 0) {
-            if (!tMap.has(combo.teacher)) tMap.set(combo.teacher, { subjects: new Set(), records: [], totalPeriods: 0 });
-            const tData = tMap.get(combo.teacher)!;
+            if (!teacherDataMap.has(combo.teacher)) {
+              const teacherInfo = teachers.find(t => t.name === combo.teacher);
+              teacherDataMap.set(combo.teacher, { dept: teacherInfo?.group || 'Chung', subjects: new Set(), records: [], totalPeriods: 0 });
+            }
+            const tData = teacherDataMap.get(combo.teacher)!;
             tData.subjects.add(combo.subject);
             tData.totalPeriods += totalP;
 
@@ -221,44 +217,107 @@ export const DisabilityReport: React.FC = () => {
               className: student.className,
               studentName: student.studentName,
               subject: combo.subject,
-              monthlyData,
-              totalP,
-              formula: formulaParts.join('\n')
+              monthlyDetails,
+              totalP
             });
           }
         });
       });
 
-      if (tMap.size === 0) {
+      if (teacherDataMap.size === 0) {
         alert("Không tìm thấy dữ liệu tiết dạy nào khớp với danh sách học sinh và Ma trận tuần bạn đã khai báo!");
         setIsExporting(false);
         return;
       }
 
-      let exportedCount = 0;
+      // 2. GOM NHÓM THEO TỔ CHUYÊN MÔN
+      teacherDataMap.forEach((tData, tName) => {
+        const dept = tData.dept;
+        if (!deptDataMap.has(dept)) deptDataMap.set(dept, { totalPeriods: 0, teachers: [] });
+        
+        const dData = deptDataMap.get(dept)!;
+        dData.teachers.push({ name: tName, total: tData.totalPeriods });
+        dData.totalPeriods += tData.totalPeriods;
+        grandTotal += tData.totalPeriods;
+      });
 
-      tMap.forEach((tData, teacherName) => {
-        const teacherInfo = teachers.find(t => t.name === teacherName);
-        const tGroup = teacherInfo?.group || 'Chung';
-        if (selectedExportDept && tGroup !== selectedExportDept) return; 
+      // Sắp xếp tên giáo viên trong tổ theo ABC
+      deptDataMap.forEach(dData => {
+        dData.teachers.sort((a, b) => {
+          const nameA = String(a.name).split(' ').pop() || '';
+          const nameB = String(b.name).split(' ').pop() || '';
+          return nameA.localeCompare(nameB, 'vi');
+        });
+      });
 
-        exportedCount++;
+      // ================= CÁC HÀM VẼ SHEET EXCEL =================
+      const createSummarySheet = (sheetName: string, title: string, col2Header: string, rows: {name: string, total: number}[], footerLabel: string, footerTotal: number) => {
+        const safeName = sheetName.substring(0, 31).replace(/[\\/?*\[\]]/g, '');
+        const ws = wb.addWorksheet(safeName);
 
+        ws.columns = [
+          { width: 8 },  // STT
+          { width: 45 }, // Cột Tên GV / Tổ CM
+          { width: 25 }, // Cột Tổng
+          { width: 25 }  // Cột Ghi chú
+        ];
+
+        ws.mergeCells('A1:D1');
+        ws.getCell('A1').value = title;
+        ws.getCell('A1').font = { name: 'Times New Roman', size: 14, bold: true };
+        ws.getCell('A1').alignment = { horizontal: 'center' };
+
+        ws.mergeCells('A2:D2');
+        ws.getCell('A2').value = `(HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear})`;
+        ws.getCell('A2').font = { name: 'Times New Roman', size: 12, italic: true };
+        ws.getCell('A2').alignment = { horizontal: 'center' };
+
+        const header = ws.getRow(4);
+        header.values = ['STT', col2Header, 'Tổng số tiết KT', 'Ghi chú'];
+        header.font = { name: 'Times New Roman', size: 12, bold: true };
+        header.alignment = { horizontal: 'center', vertical: 'middle' };
+        for(let i=1; i<=4; i++) header.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+
+        let r = 5;
+        rows.forEach((row, idx) => {
+          const hr = ws.getRow(r);
+          hr.values = [idx + 1, row.name, row.total, ''];
+          hr.font = { name: 'Times New Roman', size: 12 };
+          hr.getCell(1).alignment = { horizontal: 'center' };
+          hr.getCell(3).alignment = { horizontal: 'center', font: { bold: true } };
+          for(let i=1; i<=4; i++) hr.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+          r++;
+        });
+
+        const footer = ws.getRow(r);
+        footer.values = ['', footerLabel, footerTotal, ''];
+        footer.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: 'FF0000' } };
+        footer.getCell(3).alignment = { horizontal: 'center' };
+        for(let i=1; i<=4; i++) footer.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+
+        r += 3;
+        ws.mergeCells(`A${r}:B${r}`);
+        ws.getCell(`A${r}`).value = 'Người lập bảng';
+        ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+
+        ws.mergeCells(`C${r}:D${r}`);
+        ws.getCell(`C${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}\nHiệu trưởng`;
+        ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
+        ws.getCell(`C${r}`).alignment = { horizontal: 'center', wrapText: true };
+      };
+
+      const createIndividualSheet = (teacherName: string, tData: any) => {
         const safeName = teacherName.substring(0, 31).replace(/[\\/?*\[\]]/g, '');
         const ws = wb.addWorksheet(safeName);
 
         ws.pageSetup = {
-          paperSize: 9, 
-          orientation: 'landscape',
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
+          paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
           margins: { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
         };
 
         const getColLetter = (colIndex: number) => {
-          let temp = colIndex;
-          let letter = '';
+          let temp = colIndex; let letter = '';
           while (temp > 0) {
             let modulo = (temp - 1) % 26;
             letter = String.fromCharCode(65 + modulo) + letter;
@@ -269,64 +328,38 @@ export const DisabilityReport: React.FC = () => {
 
         const END_COL = getColLetter(TOTAL_COLS);
         const MONTH_END_COL = getColLetter(4 + M);
+        const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
 
         ws.getColumn(1).width = 6;  
         ws.getColumn(2).width = 12; 
         ws.getColumn(3).width = 25; 
-        ws.getColumn(4).width = 16; 
-        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 9; 
+        ws.getColumn(4).width = 15; 
+        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 16; 
         ws.getColumn(TOTAL_COLS - 1).width = 13; 
-        ws.getColumn(TOTAL_COLS).width = 25;     
+        ws.getColumn(TOTAL_COLS).width = 15;     
 
         let r = 1;
-        ws.mergeCells(`A${r}:C${r}`);
-        ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH';
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
-        
-        ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`);
-        ws.getCell(`D${r}`).value = 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM';
-        ws.getCell(`D${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
-        
-        ws.getCell(`${END_COL}${r}`).value = 'Mẫu 1';
-        ws.getCell(`${END_COL}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`${END_COL}${r}`).alignment = { horizontal: 'right' };
+        ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`); ws.getCell(`D${r}`).value = 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM'; ws.getCell(`D${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
+        ws.getCell(`${END_COL}${r}`).value = 'Mẫu 1'; ws.getCell(`${END_COL}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${END_COL}${r}`).alignment = { horizontal: 'right' };
         r++;
 
-        ws.mergeCells(`A${r}:C${r}`);
-        ws.getCell(`A${r}`).value = 'TRƯỜNG TRUNG HỌC CƠ SỞ';
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
-        ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`);
-        ws.getCell(`D${r}`).value = 'Độc lập - Tự do - Hạnh phúc';
-        ws.getCell(`D${r}`).font = { bold: true, underline: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'TRƯỜNG TRUNG HỌC CƠ SỞ'; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`); ws.getCell(`D${r}`).value = 'Độc lập - Tự do - Hạnh phúc'; ws.getCell(`D${r}`).font = { bold: true, underline: true, name: 'Times New Roman', size: 12 }; ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
         r++;
 
-        ws.mergeCells(`A${r}:C${r}`);
-        ws.getCell(`A${r}`).value = 'NGUYỄN BỈNH KHIÊM';
-        ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'NGUYỄN BỈNH KHIÊM'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
 
-        ws.mergeCells(`A${r}:${END_COL}${r}`);
-        ws.getCell(`A${r}`).value = 'BẢNG KÊ KHAI SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT';
-        ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 };
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = 'BẢNG KÊ KHAI SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r++;
 
-        ws.mergeCells(`A${r}:${END_COL}${r}`);
-        ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear} (TỪ THÁNG ${String(config.startMonth).padStart(2,'0')} ĐẾN THÁNG ${String(config.endMonth).padStart(2,'0')} NĂM ${config.exportDate.split('năm')[1]?.trim() || ''})`;
-        ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear} (TỪ THÁNG ${String(config.startMonth).padStart(2,'0')} ĐẾN THÁNG ${String(config.endMonth).padStart(2,'0')} NĂM ${config.exportDate.split('năm')[1]?.trim() || ''})`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
 
-        ws.mergeCells(`A${r}:${END_COL}${r}`);
-        ws.getCell(`A${r}`).value = `Giáo viên giảng dạy: ${teacherName}`;
-        ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
+        ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Giáo viên giảng dạy: ${teacherName}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
-        ws.mergeCells(`A${r}:${END_COL}${r}`);
-        ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${Array.from(tData.subjects).join(', ')}`;
-        ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
+        ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${Array.from(tData.subjects).join(', ')}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
 
         ws.mergeCells(`A${r}:A${r+1}`); ws.getCell(`A${r}`).value = 'STT';
@@ -334,19 +367,11 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`C${r}:C${r+1}`); ws.getCell(`C${r}`).value = 'Họ và tên học sinh khuyết tật';
         ws.mergeCells(`D${r}:D${r+1}`); ws.getCell(`D${r}`).value = 'Môn dạy';
         
-        ws.mergeCells(`E${r}:${MONTH_END_COL}${r}`);
-        ws.getCell(`E${r}`).value = 'Tổng số giờ dạy/tiết dạy trong kỳ\n(Ghi rõ môn dạy; số tiết thực dạy x số tuần)';
-        
-        months.forEach((m, idx) => {
-          ws.getCell(`${getColLetter(5 + idx)}${r+1}`).value = `Tháng\n${m}`;
-        });
+        ws.mergeCells(`E${r}:${MONTH_END_COL}${r}`); ws.getCell(`E${r}`).value = 'Tổng số giờ dạy/tiết dạy trong kỳ\n(Ghi rõ môn dạy; số tiết thực dạy x số tuần)';
+        months.forEach((m, idx) => { ws.getCell(`${getColLetter(5 + idx)}${r+1}`).value = `Tháng\n${m}`; });
 
-        const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
-        ws.mergeCells(`${SUM_COL_LETTER}${r}:${SUM_COL_LETTER}${r+1}`);
-        ws.getCell(`${SUM_COL_LETTER}${r}`).value = `Tổng cộng số\ntiết dạy/tuần\ntrong kỳ ${config.semester} để\ntính hưởng PC`;
-
-        ws.mergeCells(`${END_COL}${r}:${END_COL}${r+1}`);
-        ws.getCell(`${END_COL}${r}`).value = 'Ghi chú\n(Công thức)';
+        ws.mergeCells(`${SUM_COL_LETTER}${r}:${SUM_COL_LETTER}${r+1}`); ws.getCell(`${SUM_COL_LETTER}${r}`).value = `Tổng cộng số\ntiết dạy/tuần\ntrong kỳ ${config.semester} để\ntính hưởng PC`;
+        ws.mergeCells(`${END_COL}${r}:${END_COL}${r+1}`); ws.getCell(`${END_COL}${r}`).value = 'Ghi chú';
 
         for(let i=1; i<=TOTAL_COLS; i++) {
           const cTop = ws.getCell(`${getColLetter(i)}${r}`);
@@ -361,28 +386,38 @@ export const DisabilityReport: React.FC = () => {
 
         const colTotals: Record<number, number> = {};
 
-        tData.records.forEach((rec, idx) => {
+        tData.records.forEach((rec: any, idx: number) => {
           const row = ws.getRow(r);
-          row.height = 40;
+          row.height = 40; 
           row.getCell(1).value = idx + 1;
           row.getCell(2).value = rec.className;
           row.getCell(3).value = rec.studentName;
           
-          // Nêu bật môn Công tác GVCN
           row.getCell(4).value = rec.subject;
           if (rec.subject === 'Công tác GVCN') {
             row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
           }
           
           months.forEach((m, mIdx) => {
-            const val = rec.monthlyData[m] || 0;
-            row.getCell(5 + mIdx).value = val > 0 ? val : '';
-            colTotals[m] = (colTotals[m] || 0) + val;
+            const details = rec.monthlyDetails[m];
+            if (details) {
+              const lines: string[] = [];
+              let monthTotal = 0;
+              Object.entries(details).forEach(([countStr, weeks]) => {
+                const c = parseInt(countStr); const w = weeks as number;
+                lines.push(`${c}t x ${w} tuần = ${c * w}`);
+                monthTotal += (c * w);
+              });
+              row.getCell(5 + mIdx).value = lines.join('\n');
+              colTotals[m] = (colTotals[m] || 0) + monthTotal;
+            } else {
+              row.getCell(5 + mIdx).value = '';
+            }
           });
 
           row.getCell(TOTAL_COLS - 1).value = rec.totalP;
           row.getCell(TOTAL_COLS - 1).font = { bold: true, color: { argb: 'FF0000' } };
-          row.getCell(TOTAL_COLS).value = rec.formula;
+          row.getCell(TOTAL_COLS).value = '';
 
           for(let i=1; i<=TOTAL_COLS; i++) {
             const cell = row.getCell(i);
@@ -393,10 +428,7 @@ export const DisabilityReport: React.FC = () => {
           r++;
         });
 
-        ws.mergeCells(`A${r}:D${r}`);
-        ws.getCell(`A${r}`).value = 'TỔNG CỘNG SỐ TIẾT DẠY';
-        ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
+        ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'TỔNG CỘNG SỐ TIẾT DẠY'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
         
         months.forEach((m, mIdx) => {
           ws.getCell(`${getColLetter(5 + mIdx)}${r}`).value = colTotals[m] || 0;
@@ -413,79 +445,64 @@ export const DisabilityReport: React.FC = () => {
         }
         r += 2;
 
-        ws.mergeCells(`A${r}:D${r}`);
-        ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN';
-        ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r++;
-
-        ws.mergeCells(`A${r}:E${r}`);
-        ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`;
-        ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
+        ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
-
-        ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`);
-        ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`;
-        ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 };
-        ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`); ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' };
         r++;
 
         const sigSpan = Math.max(2, Math.floor(TOTAL_COLS / 4));
         
-        ws.mergeCells(r, 1, r, sigSpan);
-        ws.getCell(r, 1).value = 'Tổ trưởng chuyên môn';
-        ws.getCell(r, 1).alignment = { horizontal: 'center' };
-
-        ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2);
-        ws.getCell(r, sigSpan + 1).value = 'Phó Hiệu trưởng';
-        ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
-
-        ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3);
-        ws.getCell(r, sigSpan * 2 + 1).value = 'Hiệu trưởng';
-        ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
-
-        ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS);
-        ws.getCell(r, sigSpan * 3 + 1).value = 'Người kê khai';
-        ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
-        
-        for(let i=1; i<=TOTAL_COLS; i++) {
-          const c = ws.getCell(r, i);
-          if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 };
-        }
+        ws.mergeCells(r, 1, r, sigSpan); ws.getCell(r, 1).value = 'Tổ trưởng chuyên môn'; ws.getCell(r, 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2); ws.getCell(r, sigSpan + 1).value = 'Phó Hiệu trưởng'; ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3); ws.getCell(r, sigSpan * 2 + 1).value = 'Hiệu trưởng'; ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS); ws.getCell(r, sigSpan * 3 + 1).value = 'Người kê khai'; ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
+        for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; }
         r += 4;
 
-        ws.mergeCells(r, 1, r, sigSpan);
-        ws.getCell(r, 1).value = config.ttcm;
-        ws.getCell(r, 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, 1, r, sigSpan); ws.getCell(r, 1).value = config.ttcm; ws.getCell(r, 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2); ws.getCell(r, sigSpan + 1).value = config.vicePrincipal; ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3); ws.getCell(r, sigSpan * 2 + 1).value = config.principal; ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
+        ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS); ws.getCell(r, sigSpan * 3 + 1).value = teacherName; ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
+        for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; }
+      };
 
-        ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2);
-        ws.getCell(r, sigSpan + 1).value = config.vicePrincipal;
-        ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
-
-        ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3);
-        ws.getCell(r, sigSpan * 2 + 1).value = config.principal;
-        ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
-
-        ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS);
-        ws.getCell(r, sigSpan * 3 + 1).value = teacherName;
-        ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
-
-        for(let i=1; i<=TOTAL_COLS; i++) {
-          const c = ws.getCell(r, i);
-          if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 };
+      // ================= ĐIỀU HƯỚNG LOGIC XUẤT (LỌC HAY TOÀN TRƯỜNG) =================
+      if (selectedExportDept) {
+        // TRƯỜNG HỢP 1: LỌC MỘT TỔ CỤ THỂ
+        const dData = deptDataMap.get(selectedExportDept);
+        if (!dData) {
+          alert(`Không có giáo viên nào thuộc Tổ "${selectedExportDept}" có dạy lớp khuyết tật!`);
+          setIsExporting(false); return;
         }
 
-      });
+        // Tạo 1 Sheet Tổng hợp của Tổ lên đầu
+        createSummarySheet(`TH - ${selectedExportDept}`, `TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TỔ ${selectedExportDept.toUpperCase()}`, 'Họ và tên giáo viên', dData.teachers, 'TỔNG CỘNG TOÀN TỔ', dData.totalPeriods);
 
-      if (exportedCount === 0) {
-        alert(`Không có giáo viên nào thuộc Tổ "${selectedExportDept}" có dạy các lớp khuyết tật đã chọn!`);
-        setIsExporting(false);
-        return;
+        // Tạo N Sheet Chi tiết cho từng Giáo viên trong Tổ đó
+        dData.teachers.forEach(t => {
+          const tData = teacherDataMap.get(t.name)!;
+          createIndividualSheet(t.name, tData);
+        });
+
+      } else {
+        // TRƯỜNG HỢP 2: XUẤT TẤT CẢ (TOÀN TRƯỜNG) - BÁO CÁO TỔNG QUAN DÀNH CHO BGH
+        if (deptDataMap.size === 0) { alert("Không có dữ liệu!"); setIsExporting(false); return; }
+
+        // Tạo 1 Sheet Tổng hợp Toàn trường lên đầu
+        const schoolRows = Array.from(deptDataMap.entries()).map(([dName, data]) => ({ name: `Tổ ${dName}`, total: data.totalPeriods }));
+        createSummarySheet('TH - TOÀN TRƯỜNG', 'TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TOÀN TRƯỜNG', 'Tổ chuyên môn', schoolRows, 'TỔNG CỘNG TOÀN TRƯỜNG', grandTotal);
+
+        // Tạo M Sheet Tổng hợp cho từng Tổ
+        deptDataMap.forEach((data, deptName) => {
+          createSummarySheet(`TH - ${deptName}`, `TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TỔ ${deptName.toUpperCase()}`, 'Họ và tên giáo viên', data.teachers, 'TỔNG CỘNG TOÀN TỔ', data.totalPeriods);
+        });
       }
 
+      // Lưu file Excel
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      
       const fileName = `Bao_Cao_Khuyet_Tat_${selectedExportDept ? selectedExportDept.replace(/\s+/g, '_') : 'Toan_Truong'}_HK${config.semester}.xlsx`;
       saveAs(blob, fileName);
 
@@ -510,7 +527,7 @@ export const DisabilityReport: React.FC = () => {
           <FileSpreadsheet className="mr-2.5 text-emerald-600 h-7 w-7" /> 
           Báo cáo Kê khai Giờ dạy Khuyết tật (Mẫu 1)
         </h2>
-        <p className="text-sm text-gray-500 mt-1">Hệ thống phân bổ tự động số tiết dạy vào từng tháng dựa trên Ma trận thực dạy. Đặc biệt: Tự động cộng 1 tiết/tuần cho chức vụ GVCN.</p>
+        <p className="text-sm text-gray-500 mt-1">Hệ thống phân chia 2 cấp độ Báo cáo: In từng Tổ sẽ kèm danh sách Chi tiết GV. In Toàn trường sẽ xuất Báo cáo Tổng hợp (1 trang Toàn trường và các trang Tổng của từng Tổ).</p>
       </div>
 
       {/* ===================================================================== */}

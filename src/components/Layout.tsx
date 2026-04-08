@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { Calendar, Users, LogOut, Upload, BarChart3, Menu, X, PhoneCall } from 'lucide-react';
+import { Calendar, Users, LogOut, Upload, BarChart3, Menu, X, PhoneCall, FileSpreadsheet } from 'lucide-react';
 
 export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' | null }> = ({ role }) => {
   const navigate = useNavigate();
@@ -78,6 +78,13 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
               {(role === 'admin' || role === 'manager' || role === 'ttcm' || role === 'teacher') && (
                 <Link to="/dashboard" className={getDesktopMenuClass('/dashboard')}>
                   <BarChart3 className="h-4 w-4 mr-2" /> Thống kê
+                </Link>
+              )}
+
+              {/* 🔥 THÊM NÚT BÁO CÁO KHUYẾT TẬT CHO QUẢN LÝ & TỔ TRƯỞNG */}
+              {(role === 'admin' || role === 'manager' || role === 'ttcm') && (
+                <Link to="/disability-report" className={getDesktopMenuClass('/disability-report')}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" /> Báo cáo KT
                 </Link>
               )}
 
@@ -174,6 +181,12 @@ export const Layout: React.FC<{ role: 'admin' | 'manager' | 'teacher' | 'ttcm' |
                   <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/dashboard')}`}>
                     <BarChart3 className="h-5 w-5 mr-4" /> Bảng Thống kê
                   </Link>
+                  {/* 🔥 THÊM NÚT BÁO CÁO KHUYẾT TẬT */}
+                  {(role === 'admin' || role === 'manager' || role === 'ttcm') && (
+                    <Link to="/disability-report" onClick={() => setIsMobileMenuOpen(false)} className={`mt-2 ${getMobileMenuClass('/disability-report')}`}>
+                      <FileSpreadsheet className="h-5 w-5 mr-4" /> Báo cáo KT
+                    </Link>
+                  )}
                 </div>
               )}
 

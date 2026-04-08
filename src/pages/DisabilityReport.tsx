@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties } from 'lucide-react';
+import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
@@ -18,7 +18,7 @@ export const DisabilityReport: React.FC = () => {
   // =====================================================================
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [versions, setVersions] = useState<string[]>([]);
+  const [versions, setVersions] = useState<{ name: string, configWeeks: number }[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -26,15 +26,21 @@ export const DisabilityReport: React.FC = () => {
     const loadData = async () => {
       setLoadingData(true);
       try {
-        const [schedules, allTeachers] = await Promise.all([
+        const [schedules, allTeachers, configs] = await Promise.all([
           scheduleService.getAllSchedules(),
-          teacherService.getAllTeachers()
+          teacherService.getAllTeachers(),
+          scheduleService.getVersionConfigs()
         ]);
         setAllSchedules(schedules);
         setTeachers(allTeachers);
         
+        // Lấy danh sách version và số tuần cấu hình từ AdminDashboard để đối chiếu
         const names = Array.from(new Set(schedules.map(s => s.versionName || 'Mặc định'))).sort();
-        setVersions(names);
+        const vs = names.map(n => {
+          const cfg = configs.find(c => c.versionName === n);
+          return { name: n, configWeeks: cfg?.appliedWeeks || 0 };
+        });
+        setVersions(vs);
       } catch (error) {
         console.error("Lỗi tải dữ liệu TKB:", error);
       } finally {
@@ -69,7 +75,6 @@ export const DisabilityReport: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [selectedExportDept, setSelectedExportDept] = useState<string>('');
 
-  // Tự động tính toán mảng các tháng cần hiển thị
   const months = useMemo(() => {
     const arr: number[] = [];
     if (config.startMonth <= config.endMonth) {
@@ -81,7 +86,6 @@ export const DisabilityReport: React.FC = () => {
     return arr;
   }, [config.startMonth, config.endMonth]);
 
-  // 🔥 STATE LƯU TRỮ MA TRẬN TUẦN (Tự động lưu vào LocalStorage)
   const [weekMatrix, setWeekMatrix] = useState<Record<string, Record<number, number>>>(() => {
     const saved = localStorage.getItem('tkb_week_matrix');
     return saved ? JSON.parse(saved) : {};
@@ -120,8 +124,16 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
+  // Hàm tìm GVCN của một lớp
+  const getHomeroomTeacher = (className: string): string | null => {
+    const hrSchedule = allSchedules.find(s => 
+      s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon)
+    );
+    return hrSchedule && hrSchedule.giao_vien !== 'Chưa rõ' ? hrSchedule.giao_vien : null;
+  };
+
   // =====================================================================
-  // 3. THUẬT TOÁN XUẤT EXCEL TÍNH THEO MA TRẬN THÁNG
+  // 3. THUẬT TOÁN XUẤT EXCEL (TÍNH MA TRẬN & CỘNG 1 TIẾT CHO GVCN)
   // =====================================================================
   const handleExportExcel = async () => {
     if (students.length === 0) {
@@ -142,7 +154,9 @@ export const DisabilityReport: React.FC = () => {
       students.forEach(student => {
         const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(student.className));
         
+        // Bản đồ chứa cặp [Giáo viên - Môn học]
         const tsMap = new Map<string, { teacher: string, subject: string }>();
+        
         classSchedules.forEach(s => {
           if (s.giao_vien === 'Chưa rõ') return;
           const subject = isHDTNType(s.mon) ? 'HĐTN' : s.mon;
@@ -150,17 +164,31 @@ export const DisabilityReport: React.FC = () => {
           if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
         });
 
+        // 🔥 LOGIC MỚI: TÌM GVCN VÀ TỰ ĐỘNG THÊM MÔN "CÔNG TÁC GVCN"
+        const gvcn = getHomeroomTeacher(student.className);
+        if (gvcn) {
+          const gvcnKey = `${gvcn}|Công tác GVCN`;
+          if (!tsMap.has(gvcnKey)) {
+            tsMap.set(gvcnKey, { teacher: gvcn, subject: 'Công tác GVCN' });
+          }
+        }
+
         tsMap.forEach(combo => {
           const monthlyData: Record<number, number> = {};
           const formulaParts: string[] = [];
           let totalP = 0;
 
-          versions.forEach(vName => {
+          versions.forEach(v => {
+            const vName = v.name;
             const matrixV = weekMatrix[vName] || {};
             let count = 0; 
+            
             const vSchedules = classSchedules.filter(s => s.versionName === vName && s.giao_vien === combo.teacher);
             
-            if (combo.subject === 'HĐTN') {
+            // Gán số tiết dạy mỗi tuần
+            if (combo.subject === 'Công tác GVCN') {
+              count = 1; // GVCN luôn được tính 1 tiết/tuần
+            } else if (combo.subject === 'HĐTN') {
               count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; 
             } else {
               count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
@@ -245,7 +273,7 @@ export const DisabilityReport: React.FC = () => {
         ws.getColumn(1).width = 6;  
         ws.getColumn(2).width = 12; 
         ws.getColumn(3).width = 25; 
-        ws.getColumn(4).width = 15; 
+        ws.getColumn(4).width = 16; 
         for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 9; 
         ws.getColumn(TOTAL_COLS - 1).width = 13; 
         ws.getColumn(TOTAL_COLS).width = 25;     
@@ -331,7 +359,6 @@ export const DisabilityReport: React.FC = () => {
         }
         r += 2;
 
-        // BIẾN LƯU TỔNG CỦA TỪNG CỘT THÁNG
         const colTotals: Record<number, number> = {};
 
         tData.records.forEach((rec, idx) => {
@@ -340,9 +367,13 @@ export const DisabilityReport: React.FC = () => {
           row.getCell(1).value = idx + 1;
           row.getCell(2).value = rec.className;
           row.getCell(3).value = rec.studentName;
-          row.getCell(4).value = rec.subject;
           
-          // ĐIỀN DỮ LIỆU TỪNG THÁNG
+          // Nêu bật môn Công tác GVCN
+          row.getCell(4).value = rec.subject;
+          if (rec.subject === 'Công tác GVCN') {
+            row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
+          }
+          
           months.forEach((m, mIdx) => {
             const val = rec.monthlyData[m] || 0;
             row.getCell(5 + mIdx).value = val > 0 ? val : '';
@@ -362,13 +393,11 @@ export const DisabilityReport: React.FC = () => {
           r++;
         });
 
-        // DÒNG TỔNG CỘNG CHÂN BẢNG
         ws.mergeCells(`A${r}:D${r}`);
         ws.getCell(`A${r}`).value = 'TỔNG CỘNG SỐ TIẾT DẠY';
         ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
         ws.getCell(`A${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
         
-        // In tổng từng tháng
         months.forEach((m, mIdx) => {
           ws.getCell(`${getColLetter(5 + mIdx)}${r}`).value = colTotals[m] || 0;
           ws.getCell(`${getColLetter(5 + mIdx)}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
@@ -481,11 +510,11 @@ export const DisabilityReport: React.FC = () => {
           <FileSpreadsheet className="mr-2.5 text-emerald-600 h-7 w-7" /> 
           Báo cáo Kê khai Giờ dạy Khuyết tật (Mẫu 1)
         </h2>
-        <p className="text-sm text-gray-500 mt-1">Hệ thống phân bổ tự động số tiết dạy vào từng tháng dựa trên Ma trận thực dạy.</p>
+        <p className="text-sm text-gray-500 mt-1">Hệ thống phân bổ tự động số tiết dạy vào từng tháng dựa trên Ma trận thực dạy. Đặc biệt: Tự động cộng 1 tiết/tuần cho chức vụ GVCN.</p>
       </div>
 
       {/* ===================================================================== */}
-      {/* KHU VỰC MA TRẬN PHÂN BỔ TUẦN */}
+      {/* KHU VỰC MA TRẬN PHÂN BỔ TUẦN (CÓ CẢNH BÁO THÔNG MINH) */}
       {/* ===================================================================== */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-200">
         <div className="flex items-center justify-between mb-4">
@@ -507,12 +536,15 @@ export const DisabilityReport: React.FC = () => {
                     Tháng {m}
                   </th>
                 ))}
-                <th className="p-3 border-b border-gray-200 font-bold text-gray-600 text-sm bg-gray-100 w-32">Tổng / TKB</th>
+                <th className="p-3 border-b border-gray-200 font-bold text-gray-600 text-sm bg-gray-100 w-40">Tổng Ma trận</th>
               </tr>
             </thead>
             <tbody>
-              {versions.map(vName => {
-                const vTotal = months.reduce((sum, m) => sum + (weekMatrix[vName]?.[m] || 0), 0);
+              {versions.map(v => {
+                const vName = v.name;
+                const vTotalMatrix = months.reduce((sum, m) => sum + (weekMatrix[vName]?.[m] || 0), 0);
+                const isMismatch = vTotalMatrix !== v.configWeeks;
+
                 return (
                   <tr key={vName} className="hover:bg-indigo-50/30 transition-colors">
                     <td className="p-3 border-b border-r border-gray-200 font-bold text-gray-800 text-sm text-left">
@@ -529,8 +561,18 @@ export const DisabilityReport: React.FC = () => {
                         />
                       </td>
                     ))}
-                    <td className="p-3 border-b border-gray-200 font-black text-gray-700 bg-gray-50">
-                      {vTotal} <span className="text-xs font-normal text-gray-400">tuần</span>
+                    <td className={`p-3 border-b border-gray-200 font-black text-sm ${isMismatch ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                      <div className="flex items-center justify-center">
+                        {vTotalMatrix} <span className="text-xs font-normal ml-1">tuần</span>
+                        {isMismatch && (
+                          <div className="group relative ml-2">
+                            <AlertTriangle className="w-4 h-4 cursor-help" />
+                            <div className="absolute hidden group-hover:block bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 p-2 bg-gray-800 text-white text-xs rounded shadow-lg z-10 font-normal">
+                              Bên trang Dữ liệu (Admin) đang cấu hình là <b>{v.configWeeks}</b> tuần. Hãy kiểm tra lại!
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -540,7 +582,7 @@ export const DisabilityReport: React.FC = () => {
               <tr className="bg-indigo-50 font-bold">
                 <td className="p-3 border-t border-r border-indigo-100 text-right text-indigo-900 text-sm">TỔNG CỘNG CHUNG:</td>
                 {months.map(m => {
-                  const mTotal = versions.reduce((sum, vName) => sum + (weekMatrix[vName]?.[m] || 0), 0);
+                  const mTotal = versions.reduce((sum, v) => sum + (weekMatrix[v.name]?.[m] || 0), 0);
                   return (
                     <td key={m} className="p-3 border-t border-r border-indigo-100 text-indigo-700">
                       {mTotal}
@@ -548,7 +590,7 @@ export const DisabilityReport: React.FC = () => {
                   );
                 })}
                 <td className="p-3 border-t border-indigo-100 text-red-600 text-lg">
-                  {months.reduce((gSum, m) => gSum + versions.reduce((sum, vName) => sum + (weekMatrix[vName]?.[m] || 0), 0), 0)} <span className="text-sm font-normal text-red-400">tuần</span>
+                  {months.reduce((gSum, m) => gSum + versions.reduce((sum, v) => sum + (weekMatrix[v.name]?.[m] || 0), 0), 0)} <span className="text-sm font-normal text-red-400">tuần</span>
                 </td>
               </tr>
             </tfoot>
@@ -687,7 +729,7 @@ export const DisabilityReport: React.FC = () => {
 
                 <button 
                   onClick={handleExportExcel}
-                  disabled={students.length === 0 || isExporting}
+                  disabled={students.length === 0 || isExporting || versions.length === 0}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-xl flex items-center justify-center text-base font-bold transition-colors shadow-sm w-full sm:w-auto"
                 >
                   {isExporting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}

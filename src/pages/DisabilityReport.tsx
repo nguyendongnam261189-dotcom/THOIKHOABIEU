@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2 } from 'lucide-react';
+import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
@@ -18,7 +18,7 @@ export const DisabilityReport: React.FC = () => {
   // =====================================================================
   const [allSchedules, setAllSchedules] = useState<Schedule[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [versions, setVersions] = useState<{ name: string, weeks: number }[]>([]);
+  const [versions, setVersions] = useState<string[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -26,20 +26,15 @@ export const DisabilityReport: React.FC = () => {
     const loadData = async () => {
       setLoadingData(true);
       try {
-        const [schedules, configs, allTeachers] = await Promise.all([
+        const [schedules, allTeachers] = await Promise.all([
           scheduleService.getAllSchedules(),
-          scheduleService.getVersionConfigs(),
           teacherService.getAllTeachers()
         ]);
         setAllSchedules(schedules);
         setTeachers(allTeachers);
         
         const names = Array.from(new Set(schedules.map(s => s.versionName || 'Mặc định'))).sort();
-        const vs = names.map(n => {
-          const cfg = configs.find(c => c.versionName === n);
-          return { name: n, weeks: cfg?.appliedWeeks || 0 };
-        });
-        setVersions(vs);
+        setVersions(names);
       } catch (error) {
         console.error("Lỗi tải dữ liệu TKB:", error);
       } finally {
@@ -51,13 +46,12 @@ export const DisabilityReport: React.FC = () => {
 
   const allClassNames = Array.from(new Set(allSchedules.map(s => s.lop?.split(',')[0].trim()))).filter(Boolean).sort();
   
-  // Tự động lấy danh sách Tổ chuyên môn từ dữ liệu giáo viên
   const dynamicDepartments = useMemo(() => {
     return Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort();
   }, [teachers]);
 
   // =====================================================================
-  // 2. STATE CẤU HÌNH BÁO CÁO (LINH HOẠT THEO MẪU 1)
+  // 2. STATE CẤU HÌNH BÁO CÁO VÀ MA TRẬN TUẦN
   // =====================================================================
   const [config, setConfig] = useState({
     semester: 'II',
@@ -73,9 +67,39 @@ export const DisabilityReport: React.FC = () => {
   const [students, setStudents] = useState<DisabledStudent[]>([]);
   const [newClass, setNewClass] = useState('');
   const [newName, setNewName] = useState('');
-  
-  // 🔥 STATE CHO BỘ LỌC TỔ CHUYÊN MÔN KHI XUẤT
   const [selectedExportDept, setSelectedExportDept] = useState<string>('');
+
+  // Tự động tính toán mảng các tháng cần hiển thị
+  const months = useMemo(() => {
+    const arr: number[] = [];
+    if (config.startMonth <= config.endMonth) {
+      for (let i = config.startMonth; i <= config.endMonth; i++) arr.push(i);
+    } else {
+      for (let i = config.startMonth; i <= 12; i++) arr.push(i);
+      for (let i = 1; i <= config.endMonth; i++) arr.push(i);
+    }
+    return arr;
+  }, [config.startMonth, config.endMonth]);
+
+  // 🔥 STATE LƯU TRỮ MA TRẬN TUẦN (Tự động lưu vào LocalStorage)
+  const [weekMatrix, setWeekMatrix] = useState<Record<string, Record<number, number>>>(() => {
+    const saved = localStorage.getItem('tkb_week_matrix');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem('tkb_week_matrix', JSON.stringify(weekMatrix));
+  }, [weekMatrix]);
+
+  const handleMatrixChange = (vName: string, month: number, value: number) => {
+    setWeekMatrix(prev => ({
+      ...prev,
+      [vName]: {
+        ...(prev[vName] || {}),
+        [month]: value
+      }
+    }));
+  };
 
   const handleAddStudent = () => {
     if (!newClass.trim() || !newName.trim()) {
@@ -97,7 +121,7 @@ export const DisabilityReport: React.FC = () => {
   };
 
   // =====================================================================
-  // 3. THUẬT TOÁN XUẤT EXCEL MẪU 1 (CÓ LỌC THEO TỔ)
+  // 3. THUẬT TOÁN XUẤT EXCEL TÍNH THEO MA TRẬN THÁNG
   // =====================================================================
   const handleExportExcel = async () => {
     if (students.length === 0) {
@@ -110,14 +134,6 @@ export const DisabilityReport: React.FC = () => {
       const wb = new ExcelJS.Workbook();
       wb.creator = 'TKB Manager';
       
-      const months: number[] = [];
-      if (config.startMonth <= config.endMonth) {
-        for (let i = config.startMonth; i <= config.endMonth; i++) months.push(i);
-      } else {
-        for (let i = config.startMonth; i <= 12; i++) months.push(i);
-        for (let i = 1; i <= config.endMonth; i++) months.push(i);
-      }
-
       const M = months.length; 
       const TOTAL_COLS = 4 + M + 2; 
 
@@ -135,14 +151,14 @@ export const DisabilityReport: React.FC = () => {
         });
 
         tsMap.forEach(combo => {
-          const parts: { p: number, w: number }[] = [];
-          let totalW = 0;
+          const monthlyData: Record<number, number> = {};
+          const formulaParts: string[] = [];
           let totalP = 0;
 
-          versions.forEach(v => {
-            if (v.weeks <= 0) return;
-            let count = 0;
-            const vSchedules = classSchedules.filter(s => s.versionName === v.name && s.giao_vien === combo.teacher);
+          versions.forEach(vName => {
+            const matrixV = weekMatrix[vName] || {};
+            let count = 0; 
+            const vSchedules = classSchedules.filter(s => s.versionName === vName && s.giao_vien === combo.teacher);
             
             if (combo.subject === 'HĐTN') {
               count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; 
@@ -151,9 +167,19 @@ export const DisabilityReport: React.FC = () => {
             }
 
             if (count > 0) {
-              parts.push({ p: count, w: v.weeks });
-              totalW += v.weeks;
-              totalP += count * v.weeks;
+              let vWeeks = 0;
+              months.forEach(m => {
+                const w = matrixV[m] || 0;
+                if (w > 0) {
+                  monthlyData[m] = (monthlyData[m] || 0) + (count * w);
+                  vWeeks += w;
+                }
+              });
+
+              if (vWeeks > 0) {
+                totalP += count * vWeeks;
+                formulaParts.push(`${vName}: ${count}t x ${vWeeks} tuần`);
+              }
             }
           });
 
@@ -163,34 +189,30 @@ export const DisabilityReport: React.FC = () => {
             tData.subjects.add(combo.subject);
             tData.totalPeriods += totalP;
 
-            const isConstant = parts.every(pt => pt.p === parts[0].p);
-            const formula = isConstant ? `${parts[0].p}t/tuần x ${totalW} tuần` : parts.map(pt => `${pt.p}t x ${pt.w} tuần`).join(' + ');
-
             tData.records.push({
               className: student.className,
               studentName: student.studentName,
               subject: combo.subject,
+              monthlyData,
               totalP,
-              formula
+              formula: formulaParts.join('\n')
             });
           }
         });
       });
 
       if (tMap.size === 0) {
-        alert("Không tìm thấy dữ liệu tiết dạy nào khớp với danh sách học sinh trên hệ thống TKB!");
+        alert("Không tìm thấy dữ liệu tiết dạy nào khớp với danh sách học sinh và Ma trận tuần bạn đã khai báo!");
         setIsExporting(false);
         return;
       }
 
       let exportedCount = 0;
 
-      // VẼ EXCEL CHO TỪNG GIÁO VIÊN
       tMap.forEach((tData, teacherName) => {
-        // 🔥 LỌC THEO TỔ CHUYÊN MÔN
         const teacherInfo = teachers.find(t => t.name === teacherName);
         const tGroup = teacherInfo?.group || 'Chung';
-        if (selectedExportDept && tGroup !== selectedExportDept) return; // Bỏ qua nếu không đúng Tổ đã chọn
+        if (selectedExportDept && tGroup !== selectedExportDept) return; 
 
         exportedCount++;
 
@@ -224,9 +246,9 @@ export const DisabilityReport: React.FC = () => {
         ws.getColumn(2).width = 12; 
         ws.getColumn(3).width = 25; 
         ws.getColumn(4).width = 15; 
-        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 10; 
-        ws.getColumn(TOTAL_COLS - 1).width = 15; 
-        ws.getColumn(TOTAL_COLS).width = 20;     
+        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 9; 
+        ws.getColumn(TOTAL_COLS - 1).width = 13; 
+        ws.getColumn(TOTAL_COLS).width = 25;     
 
         let r = 1;
         ws.mergeCells(`A${r}:C${r}`);
@@ -240,6 +262,7 @@ export const DisabilityReport: React.FC = () => {
         
         ws.getCell(`${END_COL}${r}`).value = 'Mẫu 1';
         ws.getCell(`${END_COL}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
+        ws.getCell(`${END_COL}${r}`).alignment = { horizontal: 'right' };
         r++;
 
         ws.mergeCells(`A${r}:C${r}`);
@@ -308,14 +331,24 @@ export const DisabilityReport: React.FC = () => {
         }
         r += 2;
 
+        // BIẾN LƯU TỔNG CỦA TỪNG CỘT THÁNG
+        const colTotals: Record<number, number> = {};
+
         tData.records.forEach((rec, idx) => {
           const row = ws.getRow(r);
-          row.height = 30;
+          row.height = 40;
           row.getCell(1).value = idx + 1;
           row.getCell(2).value = rec.className;
           row.getCell(3).value = rec.studentName;
           row.getCell(4).value = rec.subject;
           
+          // ĐIỀN DỮ LIỆU TỪNG THÁNG
+          months.forEach((m, mIdx) => {
+            const val = rec.monthlyData[m] || 0;
+            row.getCell(5 + mIdx).value = val > 0 ? val : '';
+            colTotals[m] = (colTotals[m] || 0) + val;
+          });
+
           row.getCell(TOTAL_COLS - 1).value = rec.totalP;
           row.getCell(TOTAL_COLS - 1).font = { bold: true, color: { argb: 'FF0000' } };
           row.getCell(TOTAL_COLS).value = rec.formula;
@@ -329,13 +362,21 @@ export const DisabilityReport: React.FC = () => {
           r++;
         });
 
-        ws.mergeCells(`A${r}:${MONTH_END_COL}${r}`);
+        // DÒNG TỔNG CỘNG CHÂN BẢNG
+        ws.mergeCells(`A${r}:D${r}`);
         ws.getCell(`A${r}`).value = 'TỔNG CỘNG SỐ TIẾT DẠY';
         ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
         ws.getCell(`A${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
         
+        // In tổng từng tháng
+        months.forEach((m, mIdx) => {
+          ws.getCell(`${getColLetter(5 + mIdx)}${r}`).value = colTotals[m] || 0;
+          ws.getCell(`${getColLetter(5 + mIdx)}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
+          ws.getCell(`${getColLetter(5 + mIdx)}${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
+        });
+
         ws.getCell(`${SUM_COL_LETTER}${r}`).value = tData.totalPeriods;
-        ws.getCell(`${SUM_COL_LETTER}${r}`).font = { bold: true, name: 'Times New Roman', size: 12, underline: true };
+        ws.getCell(`${SUM_COL_LETTER}${r}`).font = { bold: true, name: 'Times New Roman', size: 13, underline: true, color: { argb: 'FF0000' } };
         ws.getCell(`${SUM_COL_LETTER}${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
 
         for(let i=1; i<=TOTAL_COLS; i++) {
@@ -343,7 +384,7 @@ export const DisabilityReport: React.FC = () => {
         }
         r += 2;
 
-        ws.mergeCells(`A${r}:C${r}`);
+        ws.mergeCells(`A${r}:D${r}`);
         ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN';
         ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
         ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
@@ -407,7 +448,6 @@ export const DisabilityReport: React.FC = () => {
 
       });
 
-      // Kiểm tra nếu lọc xong mà không có sheet nào được tạo
       if (exportedCount === 0) {
         alert(`Không có giáo viên nào thuộc Tổ "${selectedExportDept}" có dạy các lớp khuyết tật đã chọn!`);
         setIsExporting(false);
@@ -429,7 +469,7 @@ export const DisabilityReport: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-10 relative">
+    <div className="space-y-6 max-w-6xl mx-auto pb-10 relative">
       {loadingData && (
         <div className="absolute inset-0 z-50 bg-white/70 flex items-center justify-center rounded-xl">
           <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
@@ -441,7 +481,79 @@ export const DisabilityReport: React.FC = () => {
           <FileSpreadsheet className="mr-2.5 text-emerald-600 h-7 w-7" /> 
           Báo cáo Kê khai Giờ dạy Khuyết tật (Mẫu 1)
         </h2>
-        <p className="text-sm text-gray-500 mt-1">Cấu hình linh hoạt các thông số và xuất bảng kê khai tính phụ cấp theo chuẩn in ấn.</p>
+        <p className="text-sm text-gray-500 mt-1">Hệ thống phân bổ tự động số tiết dạy vào từng tháng dựa trên Ma trận thực dạy.</p>
+      </div>
+
+      {/* ===================================================================== */}
+      {/* KHU VỰC MA TRẬN PHÂN BỔ TUẦN */}
+      {/* ===================================================================== */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-200">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-indigo-900 flex items-center">
+            <TableProperties className="w-5 h-5 mr-2" /> Ma trận Phân bổ Số tuần Thực dạy
+          </h3>
+          <span className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full border border-indigo-100">
+            Dữ liệu tự động lưu
+          </span>
+        </div>
+        
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="w-full text-center border-collapse">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="p-3 border-b border-r border-gray-200 font-bold text-gray-600 text-sm w-48 text-left">Phiên bản TKB</th>
+                {months.map(m => (
+                  <th key={m} className="p-3 border-b border-r border-gray-200 font-bold text-indigo-700 text-sm">
+                    Tháng {m}
+                  </th>
+                ))}
+                <th className="p-3 border-b border-gray-200 font-bold text-gray-600 text-sm bg-gray-100 w-32">Tổng / TKB</th>
+              </tr>
+            </thead>
+            <tbody>
+              {versions.map(vName => {
+                const vTotal = months.reduce((sum, m) => sum + (weekMatrix[vName]?.[m] || 0), 0);
+                return (
+                  <tr key={vName} className="hover:bg-indigo-50/30 transition-colors">
+                    <td className="p-3 border-b border-r border-gray-200 font-bold text-gray-800 text-sm text-left">
+                      {vName}
+                    </td>
+                    {months.map(m => (
+                      <td key={m} className="p-2 border-b border-r border-gray-200">
+                        <input 
+                          type="number" min="0" 
+                          className="w-16 text-center border border-gray-300 rounded-md p-1.5 font-bold text-indigo-700 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                          value={weekMatrix[vName]?.[m] || ''}
+                          onChange={e => handleMatrixChange(vName, m, parseInt(e.target.value) || 0)}
+                          placeholder="-"
+                        />
+                      </td>
+                    ))}
+                    <td className="p-3 border-b border-gray-200 font-black text-gray-700 bg-gray-50">
+                      {vTotal} <span className="text-xs font-normal text-gray-400">tuần</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-indigo-50 font-bold">
+                <td className="p-3 border-t border-r border-indigo-100 text-right text-indigo-900 text-sm">TỔNG CỘNG CHUNG:</td>
+                {months.map(m => {
+                  const mTotal = versions.reduce((sum, vName) => sum + (weekMatrix[vName]?.[m] || 0), 0);
+                  return (
+                    <td key={m} className="p-3 border-t border-r border-indigo-100 text-indigo-700">
+                      {mTotal}
+                    </td>
+                  );
+                })}
+                <td className="p-3 border-t border-indigo-100 text-red-600 text-lg">
+                  {months.reduce((gSum, m) => gSum + versions.reduce((sum, vName) => sum + (weekMatrix[vName]?.[m] || 0), 0), 0)} <span className="text-sm font-normal text-red-400">tuần</span>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -558,7 +670,6 @@ export const DisabilityReport: React.FC = () => {
               </table>
             </div>
             
-            {/* 🔥 KHU VỰC NÚT XUẤT ĐÃ CÓ BỘ LỌC TỔ CHUYÊN MÔN */}
             <div className="mt-6 pt-5 border-t border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="text-sm text-gray-500">
                 Tổng cộng: <strong className="text-indigo-600">{students.length}</strong> học sinh
@@ -576,7 +687,7 @@ export const DisabilityReport: React.FC = () => {
 
                 <button 
                   onClick={handleExportExcel}
-                  disabled={students.length === 0 || isExporting || versions.every(v => v.weeks === 0)}
+                  disabled={students.length === 0 || isExporting}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-xl flex items-center justify-center text-base font-bold transition-colors shadow-sm w-full sm:w-auto"
                 >
                   {isExporting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}

@@ -168,38 +168,23 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
-  const getHomeroomTeacher = (className: string): string | null => {
-    const hrSchedule = allSchedules.find(s => 
-      s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon)
-    );
-    return hrSchedule && hrSchedule.giao_vien !== 'Chưa rõ' ? hrSchedule.giao_vien : null;
-  };
-
-
   // =====================================================================
-  // 🔥 LÕI TÍNH TOÁN TRUNG TÂM (UNIFIED CORE) - CHỐNG SAI LỆCH DỮ LIỆU
+  // 🔥 LÕI TÍNH TOÁN TRUNG TÂM (UNIFIED CORE)
+  // Xử lý động việc đổi GVCN giữa các TKB
   // =====================================================================
   const buildMasterRecords = (): MasterRecord[] => {
     const masterRecords: MasterRecord[] = [];
 
     students.forEach(student => {
       const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(student.className));
-      const gvcn = getHomeroomTeacher(student.className);
 
       const tsMap = new Map<string, { teacher: string, subject: string }>();
-      
       classSchedules.forEach(s => {
         if (s.giao_vien === 'Chưa rõ') return;
         const subject = isHDTNType(s.mon) ? 'HĐTN' : s.mon;
         const key = `${s.giao_vien}|${subject}`;
         if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
       });
-
-      // Ép cứng GVCN phải có môn HĐTN
-      if (gvcn) {
-        const gvcnKey = `${gvcn}|HĐTN`;
-        if (!tsMap.has(gvcnKey)) tsMap.set(gvcnKey, { teacher: gvcn, subject: 'HĐTN' });
-      }
 
       tsMap.forEach(combo => {
         const monthlyDetails: Record<number, Record<number, number>> = {};
@@ -209,11 +194,16 @@ export const DisabilityReport: React.FC = () => {
           const vName = v.name;
           const matrixV = weekMatrix[vName] || {};
           let count = 0; 
-          // Tìm chính xác version, đề phòng version bị null/undefined
+          
+          // Lấy chính xác lịch của Giáo viên này, Môn này, trong TKB vName, tại Lớp student.className
           const vSchedules = classSchedules.filter(s => (s.versionName || 'Mặc định') === vName && s.giao_vien === combo.teacher);
           
           if (combo.subject === 'HĐTN') {
-            count = (combo.teacher === gvcn) ? 3 : vSchedules.filter(s => isHDTNType(s.mon)).length;
+            // 🔥 LUẬT MỚI: Check xem trong TKB cụ thể này, giáo viên có tiết HĐTN/SHL nào không?
+            // Nếu CÓ -> Chính là GVCN của TKB này -> Auto chốt 3 tiết
+            if (vSchedules.some(s => isHDTNType(s.mon))) {
+              count = 3;
+            }
           } else {
             count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
           }
@@ -258,11 +248,10 @@ export const DisabilityReport: React.FC = () => {
     try {
       const wb = new ExcelJS.Workbook();
       wb.creator = 'TKB Manager';
-      
       const M = months.length; 
       const TOTAL_COLS = 4 + M + 2; 
 
-      // LẤY DỮ LIỆU TỪ LÕI TRUNG TÂM
+      // 🔥 Kéo dữ liệu từ Lõi Trung Tâm
       const masterRecords = buildMasterRecords();
       if (masterRecords.length === 0) {
         alert("Không tìm thấy dữ liệu tiết dạy nào!");
@@ -329,7 +318,7 @@ export const DisabilityReport: React.FC = () => {
         ws.pageSetup = { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
         const getColLetter = (colIndex: number) => { let temp = colIndex; let letter = ''; while (temp > 0) { let modulo = (temp - 1) % 26; letter = String.fromCharCode(65 + modulo) + letter; temp = Math.floor((temp - modulo) / 26); } return letter; };
         const END_COL = getColLetter(TOTAL_COLS); const MONTH_END_COL = getColLetter(4 + M); const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
-        ws.getColumn(1).width = 6; ws.getColumn(2).width = 12; ws.getColumn(3).width = 25; ws.getColumn(4).width = 15; 
+        ws.getColumn(1).width = 6; ws.getColumn(2).width = 12; ws.getColumn(3).width = 25; ws.getColumn(4).width = 16; 
         for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 16; 
         ws.getColumn(TOTAL_COLS - 1).width = 13; ws.getColumn(TOTAL_COLS).width = 15;     
 
@@ -472,7 +461,7 @@ export const DisabilityReport: React.FC = () => {
       }
       r++;
 
-      // 🔥 Kéo dữ liệu từ Lõi Trung Tâm
+      // 🔥 LẤY DỮ LIỆU TỪ LÕI TRUNG TÂM
       const masterRecords = buildMasterRecords();
       
       const pl1Data = new Map<string, { student: DisabledStudent, teachers: Map<string, number> }>();

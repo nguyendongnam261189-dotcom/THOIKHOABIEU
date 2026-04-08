@@ -6,13 +6,14 @@ import { auth, db } from './firebase';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { AdminDashboard } from './pages/AdminDashboard';
-// 🔥 CẬP NHẬT: Thay thế TeacherView bằng Directory
 import { Directory } from './pages/Directory'; 
 import { ClassView } from './pages/ClassView';
 import { SubstituteTeacher } from './pages/SubstituteTeacher';
 import { TeacherManagement } from './pages/TeacherManagement';
 import { UserManagement } from './pages/UserManagement';
 import { Dashboard } from './pages/Dashboard'; 
+// 🔥 THÊM IMPORT TRANG BÁO CÁO KHUYẾT TẬT MỚI
+import { DisabilityReport } from './pages/DisabilityReport';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Loader2, Clock, XCircle, HardHat, AlertTriangle } from 'lucide-react';
 import { ZaloWarning } from './components/ZaloWarning';
@@ -143,7 +144,7 @@ const App: React.FC = () => {
         setTeacherName(null);
         setStatus(null);
       }
-      setLoading(false);
+      loading && setLoading(false);
     });
 
     return () => unsubscribe();
@@ -179,10 +180,8 @@ const App: React.FC = () => {
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
           
           <Route path="/" element={user ? <Layout role={role} /> : <Navigate to="/login" />}>
-            {/* 🔥 CẬP NHẬT: Đặt Trang Danh bạ làm trang chủ mặc định (index) */}
             <Route index element={<Directory role={role} department={department} teacherName={teacherName} />} />
             
-            {/* 🔥 CẬP NHẬT: Đã truyền teacherName vào ClassView để tự động tìm Lớp Chủ Nhiệm */}
             <Route path="class" element={<ClassView teacherName={teacherName} />} />
             
             <Route 
@@ -205,6 +204,13 @@ const App: React.FC = () => {
               path="teacher-management" 
               element={(role === 'admin' || role === 'ttcm') ? <TeacherManagement role={role} department={department} /> : <Navigate to="/" />} 
             />
+            
+            {/* 🔥 THÊM ROUTE CHO TRANG BÁO CÁO KHUYẾT TẬT: Chỉ admin, manager và ttcm được vào */}
+            <Route 
+              path="disability-report" 
+              element={(role === 'admin' || role === 'manager' || role === 'ttcm') ? <DisabilityReport role={role} department={department} /> : <Navigate to="/" />} 
+            />
+
           </Route>
         </Routes>
       </Router>

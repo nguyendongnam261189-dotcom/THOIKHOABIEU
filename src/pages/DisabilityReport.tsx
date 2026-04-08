@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle, Upload, Save } from 'lucide-react';
+import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle, Upload, Save, FileText } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
@@ -118,7 +118,6 @@ export const DisabilityReport: React.FC = () => {
     setStudents(students.filter(s => s.id !== id));
   };
 
-  // TÍNH NĂNG: XUẤT VÀ NHẬP DANH SÁCH HỌC SINH BẰNG EXCEL
   const handleBackupStudents = async () => {
     if (students.length === 0) return;
     try {
@@ -190,10 +189,17 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
+  const getHomeroomTeacher = (className: string): string | null => {
+    const hrSchedule = allSchedules.find(s => 
+      s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon)
+    );
+    return hrSchedule && hrSchedule.giao_vien !== 'Chưa rõ' ? hrSchedule.giao_vien : null;
+  };
+
   // =====================================================================
-  // 3. THUẬT TOÁN XUẤT EXCEL: TỔNG HỢP VÀ CHI TIẾT
+  // 3A. XUẤT EXCEL: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN & TỔNG HỢP TỔ)
   // =====================================================================
-  const handleExportExcel = async () => {
+  const handleExportExcelMau1 = async () => {
     if (students.length === 0) {
       alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
       return;
@@ -211,18 +217,22 @@ export const DisabilityReport: React.FC = () => {
       const deptDataMap = new Map<string, { totalPeriods: number, teachers: { name: string, total: number }[] }>();
       let grandTotal = 0;
 
-      // 1. TÍNH TOÁN DỮ LIỆU CHO TẤT CẢ GIÁO VIÊN
       students.forEach(student => {
         const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(student.className));
+        const gvcn = getHomeroomTeacher(student.className);
+
         const tsMap = new Map<string, { teacher: string, subject: string }>();
-        
         classSchedules.forEach(s => {
           if (s.giao_vien === 'Chưa rõ') return;
-          // Quy tất cả các tiết GVCN thành môn 'HĐTN' chuẩn
           const subject = isHDTNType(s.mon) ? 'HĐTN' : s.mon;
           const key = `${s.giao_vien}|${subject}`;
           if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
         });
+
+        if (gvcn) {
+          const gvcnKey = `${gvcn}|HĐTN`;
+          if (!tsMap.has(gvcnKey)) tsMap.set(gvcnKey, { teacher: gvcn, subject: 'HĐTN' });
+        }
 
         tsMap.forEach(combo => {
           const monthlyDetails: Record<number, Record<number, number>> = {};
@@ -234,9 +244,12 @@ export const DisabilityReport: React.FC = () => {
             let count = 0; 
             const vSchedules = classSchedules.filter(s => s.versionName === vName && s.giao_vien === combo.teacher);
             
-            // Nếu là HĐTN (GVCN) thì luôn ấn định là 3 tiết
             if (combo.subject === 'HĐTN') {
-              count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; 
+              if (combo.teacher === gvcn) {
+                count = 3; 
+              } else {
+                count = vSchedules.filter(s => isHDTNType(s.mon)).length;
+              }
             } else {
               count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
             }
@@ -282,11 +295,9 @@ export const DisabilityReport: React.FC = () => {
         return;
       }
 
-      // 2. GOM NHÓM THEO TỔ CHUYÊN MÔN
       teacherDataMap.forEach((tData, tName) => {
         const dept = tData.dept;
         if (!deptDataMap.has(dept)) deptDataMap.set(dept, { totalPeriods: 0, teachers: [] });
-        
         const dData = deptDataMap.get(dept)!;
         dData.teachers.push({ name: tName, total: tData.totalPeriods });
         dData.totalPeriods += tData.totalPeriods;
@@ -301,61 +312,32 @@ export const DisabilityReport: React.FC = () => {
         });
       });
 
-      // ================= CÁC HÀM VẼ SHEET EXCEL =================
       const createSummarySheet = (sheetName: string, title: string, col2Header: string, rows: {name: string, total: number}[], footerLabel: string, footerTotal: number) => {
         const safeName = sheetName.substring(0, 31).replace(/[\\/?*\[\]]/g, '');
         const ws = wb.addWorksheet(safeName);
 
-        ws.columns = [
-          { width: 8 },  // STT
-          { width: 45 }, // Cột Tên GV / Tổ CM
-          { width: 25 }, // Cột Tổng
-          { width: 25 }  // Cột Ghi chú
-        ];
+        ws.columns = [ { width: 8 }, { width: 45 }, { width: 25 }, { width: 25 } ];
 
-        ws.mergeCells('A1:D1');
-        ws.getCell('A1').value = title;
-        ws.getCell('A1').font = { name: 'Times New Roman', size: 14, bold: true };
-        ws.getCell('A1').alignment = { horizontal: 'center' };
+        ws.mergeCells('A1:D1'); ws.getCell('A1').value = title; ws.getCell('A1').font = { name: 'Times New Roman', size: 14, bold: true }; ws.getCell('A1').alignment = { horizontal: 'center' };
+        ws.mergeCells('A2:D2'); ws.getCell('A2').value = `(HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear})`; ws.getCell('A2').font = { name: 'Times New Roman', size: 12, italic: true }; ws.getCell('A2').alignment = { horizontal: 'center' };
 
-        ws.mergeCells('A2:D2');
-        ws.getCell('A2').value = `(HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear})`;
-        ws.getCell('A2').font = { name: 'Times New Roman', size: 12, italic: true };
-        ws.getCell('A2').alignment = { horizontal: 'center' };
-
-        const header = ws.getRow(4);
-        header.values = ['STT', col2Header, 'Tổng số tiết KT', 'Ghi chú'];
-        header.font = { name: 'Times New Roman', size: 12, bold: true };
-        header.alignment = { horizontal: 'center', vertical: 'middle' };
+        const header = ws.getRow(4); header.values = ['STT', col2Header, 'Tổng số tiết KT', 'Ghi chú']; header.font = { name: 'Times New Roman', size: 12, bold: true }; header.alignment = { horizontal: 'center', vertical: 'middle' };
         for(let i=1; i<=4; i++) header.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
         let r = 5;
         rows.forEach((row, idx) => {
-          const hr = ws.getRow(r);
-          hr.values = [idx + 1, row.name, row.total, ''];
-          hr.font = { name: 'Times New Roman', size: 12 };
-          hr.getCell(1).alignment = { horizontal: 'center' };
-          hr.getCell(3).alignment = { horizontal: 'center', font: { bold: true } };
+          const hr = ws.getRow(r); hr.values = [idx + 1, row.name, row.total, '']; hr.font = { name: 'Times New Roman', size: 12 };
+          hr.getCell(1).alignment = { horizontal: 'center' }; hr.getCell(3).alignment = { horizontal: 'center', font: { bold: true } };
           for(let i=1; i<=4; i++) hr.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
           r++;
         });
 
-        const footer = ws.getRow(r);
-        footer.values = ['', footerLabel, footerTotal, ''];
-        footer.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: 'FF0000' } };
-        footer.getCell(3).alignment = { horizontal: 'center' };
-        for(let i=1; i<=4; i++) footer.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+        const footer = ws.getRow(r); footer.values = ['', footerLabel, footerTotal, '']; footer.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: 'FF0000' } };
+        footer.getCell(3).alignment = { horizontal: 'center' }; for(let i=1; i<=4; i++) footer.getCell(i).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
         r += 3;
-        ws.mergeCells(`A${r}:B${r}`);
-        ws.getCell(`A${r}`).value = 'Người lập bảng';
-        ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
-        ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
-
-        ws.mergeCells(`C${r}:D${r}`);
-        ws.getCell(`C${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}\nHiệu trưởng`;
-        ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true };
-        ws.getCell(`C${r}`).alignment = { horizontal: 'center', wrapText: true };
+        ws.mergeCells(`A${r}:B${r}`); ws.getCell(`A${r}`).value = 'Người lập bảng'; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12, bold: true }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+        ws.mergeCells(`C${r}:D${r}`); ws.getCell(`C${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}\nHiệu trưởng`; ws.getCell(`C${r}`).font = { name: 'Times New Roman', size: 12, bold: true }; ws.getCell(`C${r}`).alignment = { horizontal: 'center', wrapText: true };
       };
 
       const createIndividualSheet = (teacherName: string, tData: any) => {
@@ -369,48 +351,32 @@ export const DisabilityReport: React.FC = () => {
 
         const getColLetter = (colIndex: number) => {
           let temp = colIndex; let letter = '';
-          while (temp > 0) {
-            let modulo = (temp - 1) % 26;
-            letter = String.fromCharCode(65 + modulo) + letter;
-            temp = Math.floor((temp - modulo) / 26);
-          }
+          while (temp > 0) { let modulo = (temp - 1) % 26; letter = String.fromCharCode(65 + modulo) + letter; temp = Math.floor((temp - modulo) / 26); }
           return letter;
         };
 
-        const END_COL = getColLetter(TOTAL_COLS);
-        const MONTH_END_COL = getColLetter(4 + M);
-        const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
+        const END_COL = getColLetter(TOTAL_COLS); const MONTH_END_COL = getColLetter(4 + M); const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
 
-        ws.getColumn(1).width = 6;  
-        ws.getColumn(2).width = 12; 
-        ws.getColumn(3).width = 25; 
-        ws.getColumn(4).width = 16; 
+        ws.getColumn(1).width = 6;  ws.getColumn(2).width = 12; ws.getColumn(3).width = 25; ws.getColumn(4).width = 16; 
         for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 16; 
-        ws.getColumn(TOTAL_COLS - 1).width = 13; 
-        ws.getColumn(TOTAL_COLS).width = 15;     
+        ws.getColumn(TOTAL_COLS - 1).width = 13; ws.getColumn(TOTAL_COLS).width = 15;     
 
         let r = 1;
         ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`); ws.getCell(`D${r}`).value = 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM'; ws.getCell(`D${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
         ws.getCell(`${END_COL}${r}`).value = 'Mẫu 1'; ws.getCell(`${END_COL}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${END_COL}${r}`).alignment = { horizontal: 'right' };
         r++;
-
         ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'TRƯỜNG TRUNG HỌC CƠ SỞ'; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         ws.mergeCells(`D${r}:${getColLetter(TOTAL_COLS - 1)}${r}`); ws.getCell(`D${r}`).value = 'Độc lập - Tự do - Hạnh phúc'; ws.getCell(`D${r}`).font = { bold: true, underline: true, name: 'Times New Roman', size: 12 }; ws.getCell(`D${r}`).alignment = { horizontal: 'center' };
         r++;
-
         ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'NGUYỄN BỈNH KHIÊM'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
-
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = 'BẢNG KÊ KHAI SỐ GIỜ DẠY (TIẾT DẠY) Ở LỚP CÓ NGƯỜI KHUYẾT TẬT'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r++;
-
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear} (TỪ THÁNG ${String(config.startMonth).padStart(2,'0')} ĐẾN THÁNG ${String(config.endMonth).padStart(2,'0')} NĂM ${config.exportDate.split('năm')[1]?.trim() || ''})`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
 
-        // Đổi tên "HĐTN" thành "HĐTN (GVCN)" để in lên đầu Header cho dễ hiểu
         const displaySubjects = Array.from(tData.subjects).map(s => s === 'HĐTN' ? 'HĐTN (GVCN)' : s);
-
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Giáo viên giảng dạy: ${teacherName}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${displaySubjects.join(', ')}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
@@ -428,94 +394,56 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`${END_COL}${r}:${END_COL}${r+1}`); ws.getCell(`${END_COL}${r}`).value = 'Ghi chú';
 
         for(let i=1; i<=TOTAL_COLS; i++) {
-          const cTop = ws.getCell(`${getColLetter(i)}${r}`);
-          const cBot = ws.getCell(`${getColLetter(i)}${r+1}`);
-          [cTop, cBot].forEach(c => {
-            c.font = { bold: true, name: 'Times New Roman', size: 11 };
-            c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-            c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-          });
+          const cTop = ws.getCell(`${getColLetter(i)}${r}`); const cBot = ws.getCell(`${getColLetter(i)}${r+1}`);
+          [cTop, cBot].forEach(c => { c.font = { bold: true, name: 'Times New Roman', size: 11 }; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} }; });
         }
         r += 2;
 
         const colTotals: Record<number, number> = {};
 
         tData.records.forEach((rec: any, idx: number) => {
-          const row = ws.getRow(r);
-          row.height = 40; 
-          row.getCell(1).value = idx + 1;
-          row.getCell(2).value = rec.className;
-          row.getCell(3).value = rec.studentName;
+          const row = ws.getRow(r); row.height = 40; 
+          row.getCell(1).value = idx + 1; row.getCell(2).value = rec.className; row.getCell(3).value = rec.studentName;
           
-          // Nêu bật môn HĐTN (GVCN)
           row.getCell(4).value = rec.subject === 'HĐTN' ? 'HĐTN (GVCN)' : rec.subject;
-          if (rec.subject === 'HĐTN') {
-            row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
-          }
+          if (rec.subject === 'HĐTN') row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
           
           months.forEach((m, mIdx) => {
             const details = rec.monthlyDetails[m];
             if (details) {
-              const lines: string[] = [];
-              let monthTotal = 0;
+              const lines: string[] = []; let monthTotal = 0;
               Object.entries(details).forEach(([countStr, weeks]) => {
                 const c = parseInt(countStr); const w = weeks as number;
-                lines.push(`${c}t x ${w} tuần = ${c * w}`);
-                monthTotal += (c * w);
+                lines.push(`${c}t x ${w} tuần = ${c * w}`); monthTotal += (c * w);
               });
-              row.getCell(5 + mIdx).value = lines.join('\n');
-              colTotals[m] = (colTotals[m] || 0) + monthTotal;
-            } else {
-              row.getCell(5 + mIdx).value = '';
-            }
+              row.getCell(5 + mIdx).value = lines.join('\n'); colTotals[m] = (colTotals[m] || 0) + monthTotal;
+            } else row.getCell(5 + mIdx).value = '';
           });
 
-          row.getCell(TOTAL_COLS - 1).value = rec.totalP;
-          row.getCell(TOTAL_COLS - 1).font = { bold: true, color: { argb: 'FF0000' } };
+          row.getCell(TOTAL_COLS - 1).value = rec.totalP; row.getCell(TOTAL_COLS - 1).font = { bold: true, color: { argb: 'FF0000' } };
           row.getCell(TOTAL_COLS).value = '';
 
-          for(let i=1; i<=TOTAL_COLS; i++) {
-            const cell = row.getCell(i);
-            cell.font = cell.font || { name: 'Times New Roman', size: 11 };
-            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-            cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-          }
+          for(let i=1; i<=TOTAL_COLS; i++) { const cell = row.getCell(i); cell.font = cell.font || { name: 'Times New Roman', size: 11 }; cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} }; }
           r++;
         });
 
         ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'TỔNG CỘNG SỐ TIẾT DẠY'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
-        
-        months.forEach((m, mIdx) => {
-          ws.getCell(`${getColLetter(5 + mIdx)}${r}`).value = colTotals[m] || 0;
-          ws.getCell(`${getColLetter(5 + mIdx)}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 };
-          ws.getCell(`${getColLetter(5 + mIdx)}${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
-        });
-
-        ws.getCell(`${SUM_COL_LETTER}${r}`).value = tData.totalPeriods;
-        ws.getCell(`${SUM_COL_LETTER}${r}`).font = { bold: true, name: 'Times New Roman', size: 13, underline: true, color: { argb: 'FF0000' } };
-        ws.getCell(`${SUM_COL_LETTER}${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
-
-        for(let i=1; i<=TOTAL_COLS; i++) {
-          ws.getCell(`${getColLetter(i)}${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-        }
+        months.forEach((m, mIdx) => { ws.getCell(`${getColLetter(5 + mIdx)}${r}`).value = colTotals[m] || 0; ws.getCell(`${getColLetter(5 + mIdx)}${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${getColLetter(5 + mIdx)}${r}`).alignment = { horizontal: 'center', vertical: 'middle' }; });
+        ws.getCell(`${SUM_COL_LETTER}${r}`).value = tData.totalPeriods; ws.getCell(`${SUM_COL_LETTER}${r}`).font = { bold: true, name: 'Times New Roman', size: 13, underline: true, color: { argb: 'FF0000' } }; ws.getCell(`${SUM_COL_LETTER}${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
+        for(let i=1; i<=TOTAL_COLS; i++) ws.getCell(`${getColLetter(i)}${r}`).border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
         r += 2;
 
-        ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
-        r++;
-        ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
-        r++;
-        ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`); ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' };
-        r++;
-
-        const sigSpan = Math.max(2, Math.floor(TOTAL_COLS / 4));
+        ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+        ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 }; r++;
+        ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`); ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' }; r++;
         
+        const sigSpan = Math.max(2, Math.floor(TOTAL_COLS / 4));
         ws.mergeCells(r, 1, r, sigSpan); ws.getCell(r, 1).value = 'Tổ trưởng chuyên môn'; ws.getCell(r, 1).alignment = { horizontal: 'center' };
         ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2); ws.getCell(r, sigSpan + 1).value = 'Phó Hiệu trưởng'; ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
         ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3); ws.getCell(r, sigSpan * 2 + 1).value = 'Hiệu trưởng'; ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
         ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS); ws.getCell(r, sigSpan * 3 + 1).value = 'Người kê khai'; ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
-        for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; }
-        r += 4;
-
+        for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; } r += 4;
+        
         ws.mergeCells(r, 1, r, sigSpan); ws.getCell(r, 1).value = config.ttcm; ws.getCell(r, 1).alignment = { horizontal: 'center' };
         ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2); ws.getCell(r, sigSpan + 1).value = config.vicePrincipal; ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
         ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3); ws.getCell(r, sigSpan * 2 + 1).value = config.principal; ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
@@ -523,7 +451,6 @@ export const DisabilityReport: React.FC = () => {
         for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; }
       };
 
-      // ================= ĐIỀU HƯỚNG LOGIC XUẤT (LỌC HAY TOÀN TRƯỜNG) =================
       if (selectedExportDept) {
         const dData = deptDataMap.get(selectedExportDept);
         if (!dData) {
@@ -531,10 +458,7 @@ export const DisabilityReport: React.FC = () => {
           setIsExporting(false); return;
         }
         createSummarySheet(`TH - ${selectedExportDept}`, `TỔNG HỢP TIẾT DẠY KHUYẾT TẬT - TỔ ${selectedExportDept.toUpperCase()}`, 'Họ và tên giáo viên', dData.teachers, 'TỔNG CỘNG TOÀN TỔ', dData.totalPeriods);
-        dData.teachers.forEach(t => {
-          const tData = teacherDataMap.get(t.name)!;
-          createIndividualSheet(t.name, tData);
-        });
+        dData.teachers.forEach(t => { createIndividualSheet(t.name, teacherDataMap.get(t.name)!); });
       } else {
         if (deptDataMap.size === 0) { alert("Không có dữ liệu!"); setIsExporting(false); return; }
         const schoolRows = Array.from(deptDataMap.entries()).map(([dName, data]) => ({ name: `Tổ ${dName}`, total: data.totalPeriods }));
@@ -546,15 +470,170 @@ export const DisabilityReport: React.FC = () => {
 
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const fileName = `Bao_Cao_Khuyet_Tat_${selectedExportDept ? selectedExportDept.replace(/\s+/g, '_') : 'Toan_Truong'}_HK${config.semester}.xlsx`;
-      saveAs(blob, fileName);
+      saveAs(blob, `Bao_Cao_Khuyet_Tat_Mau1_${selectedExportDept ? selectedExportDept.replace(/\s+/g, '_') : 'Toan_Truong'}_HK${config.semester}.xlsx`);
 
     } catch (error) {
-      console.error(error);
-      alert("Đã xảy ra lỗi trong quá trình tạo file Excel!");
-    } finally {
-      setIsExporting(false);
+      console.error(error); alert("Đã xảy ra lỗi trong quá trình tạo file Excel!");
+    } finally { setIsExporting(false); }
+  };
+
+
+  // 👉 HÀM XUẤT PHỤ LỤC 1 (GOM THEO HỌC SINH - TOÀN TRƯỜNG)
+  const handleExportExcelPhuLuc1 = async () => {
+    if (students.length === 0) {
+      alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!"); return;
     }
+    setIsExporting(true);
+
+    try {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Phu_Luc_1');
+
+      ws.pageSetup = { paperSize: 9, orientation: 'portrait', margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+
+      ws.columns = [
+        { width: 6 },  
+        { width: 25 }, 
+        { width: 10 }, 
+        { width: 35 }, 
+        { width: 15 }  
+      ];
+
+      let r = 1;
+      ws.getCell(`E${r}`).value = 'Phụ lục 1'; ws.getCell(`E${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`E${r}`).alignment = { horizontal: 'right' }; r++;
+      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'TRƯỜNG THCS NGUYỄN BỈNH KHIÊM'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
+      
+      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = 'DANH SÁCH HỌC SINH KHUYẾT TẬT'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `(Cơ sở để tính chế độ phụ cấp ưu đãi giảng dạy người khuyết tật Học kỳ ${config.semester.toUpperCase()} Năm học ${config.schoolYear} theo Nghị định số 28/2012/NĐ-CP)`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
+
+      const header = ws.getRow(r);
+      header.values = ['TT', 'Họ tên học sinh', 'Lớp', 'Họ tên Giáo viên giảng dạy', 'Số tiết thực dạy'];
+      header.height = 30;
+      for(let i=1; i<=5; i++) {
+        const c = header.getCell(i);
+        c.font = { bold: true, name: 'Times New Roman', size: 12 };
+        c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+      }
+      r++;
+
+      let grandTotal = 0;
+      const globalTeachers = new Set<string>();
+      let studentIndex = 1;
+
+      // 🔥 SẮP XẾP DANH SÁCH HỌC SINH THEO LỚP -> TÊN TRƯỚC KHI XUẤT
+      const sortedStudents = [...students].sort((a, b) => {
+        const classCompare = a.className.localeCompare(b.className, 'vi', { numeric: true });
+        if (classCompare !== 0) return classCompare;
+        return a.studentName.localeCompare(b.studentName, 'vi');
+      });
+
+      sortedStudents.forEach(student => {
+        const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(student.className));
+        const gvcn = getHomeroomTeacher(student.className);
+
+        const tsMap = new Map<string, { teacher: string, subject: string }>();
+        classSchedules.forEach(s => {
+          if (s.giao_vien === 'Chưa rõ') return;
+          const subject = isHDTNType(s.mon) ? 'HĐTN' : s.mon;
+          const key = `${s.giao_vien}|${subject}`;
+          if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
+        });
+
+        if (gvcn) {
+          const gvcnKey = `${gvcn}|HĐTN`;
+          if (!tsMap.has(gvcnKey)) tsMap.set(gvcnKey, { teacher: gvcn, subject: 'HĐTN' });
+        }
+
+        const teacherTotals = new Map<string, number>();
+
+        tsMap.forEach(combo => {
+          let subjectTotal = 0;
+          versions.forEach(v => {
+            const matrixV = weekMatrix[v.name] || {};
+            let vWeeks = 0; months.forEach(m => vWeeks += (matrixV[m] || 0));
+            if (vWeeks > 0) {
+              let count = 0;
+              const vSchedules = classSchedules.filter(s => s.versionName === v.name && s.giao_vien === combo.teacher);
+              if (combo.subject === 'HĐTN') count = (combo.teacher === gvcn) ? 3 : vSchedules.filter(s => isHDTNType(s.mon)).length;
+              else count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
+              subjectTotal += count * vWeeks;
+            }
+          });
+
+          if (subjectTotal > 0) {
+            teacherTotals.set(combo.teacher, (teacherTotals.get(combo.teacher) || 0) + subjectTotal);
+            globalTeachers.add(combo.teacher);
+          }
+        });
+
+        // 🔥 BỎ LỌC THEO TỔ: Luôn xuất toàn bộ giáo viên giảng dạy em học sinh đó
+        const allTeachersForStudent = Array.from(teacherTotals.entries()).map(([name, total]) => ({name, total}));
+
+        if (allTeachersForStudent.length > 0) {
+          const startR = r;
+          allTeachersForStudent.forEach((t) => {
+            const row = ws.getRow(r);
+            row.height = 25;
+            row.getCell(1).value = studentIndex;
+            row.getCell(2).value = student.studentName;
+            row.getCell(3).value = student.className.replace(/\./g, '/');
+            row.getCell(4).value = t.name;
+            row.getCell(5).value = t.total;
+            for(let i=1; i<=5; i++) {
+              const c = row.getCell(i);
+              c.font = { name: 'Times New Roman', size: 12 };
+              c.alignment = { horizontal: i===2||i===4 ? 'left' : 'center', vertical: 'middle' };
+              c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+            }
+            grandTotal += t.total;
+            r++;
+          });
+          
+          if (allTeachersForStudent.length > 1) {
+            ws.mergeCells(startR, 1, r-1, 1);
+            ws.mergeCells(startR, 2, r-1, 2);
+            ws.mergeCells(startR, 3, r-1, 3);
+          }
+          studentIndex++;
+        }
+      });
+
+      if (studentIndex === 1) {
+        alert("Không có giáo viên nào giảng dạy danh sách học sinh này!");
+        setIsExporting(false); return;
+      }
+
+      const footR = ws.getRow(r);
+      footR.height = 30;
+      ws.mergeCells(`A${r}:D${r}`);
+      footR.getCell(1).value = 'Tổng Cộng';
+      footR.getCell(5).value = grandTotal;
+      for(let i=1; i<=5; i++) {
+        const c = footR.getCell(i);
+        c.font = { bold: true, name: 'Times New Roman', size: 13 };
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        if(i===1 || i===5) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+      }
+      r += 2;
+
+      ws.mergeCells(`A${r}:E${r}`);
+      ws.getCell(`A${r}`).value = `Danh sách trên có: ${globalTeachers.size} giáo viên giảng dạy.`;
+      ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 13 };
+      r++;
+      ws.mergeCells(`A${r}:E${r}`);
+      ws.getCell(`A${r}`).value = `Tổng số tiết dạy: ${grandTotal} tiết`;
+      ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 13 };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Phu_Luc_1_HSKT_Toan_Truong_HK${config.semester}.xlsx`);
+
+    } catch (error) { 
+      console.error(error); alert("Lỗi xuất Phụ Lục 1!"); 
+    } finally { setIsExporting(false); }
   };
 
   return (
@@ -568,34 +647,27 @@ export const DisabilityReport: React.FC = () => {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-emerald-200">
         <h2 className="text-2xl font-bold text-gray-800 flex items-center mb-1">
           <FileSpreadsheet className="mr-2.5 text-emerald-600 h-7 w-7" /> 
-          Báo cáo Kê khai Giờ dạy Khuyết tật (Mẫu 1)
+          Báo cáo Kê khai Giờ dạy Khuyết tật
         </h2>
-        <p className="text-sm text-gray-500 mt-1">Hệ thống phân bổ tự động số tiết dạy vào từng tháng dựa trên Ma trận thực dạy.</p>
+        <p className="text-sm text-gray-500 mt-1">Quản lý ma trận tuần và xuất 2 loại báo cáo: Mẫu 1 (Theo Tổ) và Phụ lục 1 (Tổng hợp Toàn trường theo Lớp).</p>
       </div>
 
       {/* ===================================================================== */}
-      {/* KHU VỰC MA TRẬN PHÂN BỔ TUẦN (CÓ CẢNH BÁO THÔNG MINH) */}
+      {/* KHU VỰC MA TRẬN PHÂN BỔ TUẦN */}
       {/* ===================================================================== */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-200">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-indigo-900 flex items-center">
             <TableProperties className="w-5 h-5 mr-2" /> Ma trận Phân bổ Số tuần Thực dạy
           </h3>
-          <span className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full border border-indigo-100">
-            Dữ liệu tự động lưu
-          </span>
+          <span className="text-xs font-bold bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full border border-indigo-100">Dữ liệu tự động lưu</span>
         </div>
-        
         <div className="overflow-x-auto rounded-lg border border-gray-200">
           <table className="w-full text-center border-collapse">
             <thead>
               <tr className="bg-gray-50">
                 <th className="p-3 border-b border-r border-gray-200 font-bold text-gray-600 text-sm w-48 text-left">Phiên bản TKB</th>
-                {months.map(m => (
-                  <th key={m} className="p-3 border-b border-r border-gray-200 font-bold text-indigo-700 text-sm">
-                    Tháng {m}
-                  </th>
-                ))}
+                {months.map(m => <th key={m} className="p-3 border-b border-r border-gray-200 font-bold text-indigo-700 text-sm">Tháng {m}</th>)}
                 <th className="p-3 border-b border-gray-200 font-bold text-gray-600 text-sm bg-gray-100 w-40">Tổng Ma trận</th>
               </tr>
             </thead>
@@ -607,18 +679,10 @@ export const DisabilityReport: React.FC = () => {
 
                 return (
                   <tr key={vName} className="hover:bg-indigo-50/30 transition-colors">
-                    <td className="p-3 border-b border-r border-gray-200 font-bold text-gray-800 text-sm text-left">
-                      {vName}
-                    </td>
+                    <td className="p-3 border-b border-r border-gray-200 font-bold text-gray-800 text-sm text-left">{vName}</td>
                     {months.map(m => (
                       <td key={m} className="p-2 border-b border-r border-gray-200">
-                        <input 
-                          type="number" min="0" 
-                          className="w-16 text-center border border-gray-300 rounded-md p-1.5 font-bold text-indigo-700 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                          value={weekMatrix[vName]?.[m] || ''}
-                          onChange={e => handleMatrixChange(vName, m, parseInt(e.target.value) || 0)}
-                          placeholder="-"
-                        />
+                        <input type="number" min="0" className="w-16 text-center border border-gray-300 rounded-md p-1.5 font-bold text-indigo-700 focus:ring-2 focus:ring-indigo-500 outline-none" value={weekMatrix[vName]?.[m] || ''} onChange={e => handleMatrixChange(vName, m, parseInt(e.target.value) || 0)} placeholder="-" />
                       </td>
                     ))}
                     <td className={`p-3 border-b border-gray-200 font-black text-sm ${isMismatch ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
@@ -628,7 +692,7 @@ export const DisabilityReport: React.FC = () => {
                           <div className="group relative ml-2">
                             <AlertTriangle className="w-4 h-4 cursor-help" />
                             <div className="absolute hidden group-hover:block bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 p-2 bg-gray-800 text-white text-xs rounded shadow-lg z-10 font-normal">
-                              Bên trang Dữ liệu (Admin) đang cấu hình là <b>{v.configWeeks}</b> tuần. Hãy kiểm tra lại!
+                              Bên trang Admin cấu hình là <b>{v.configWeeks}</b> tuần.
                             </div>
                           </div>
                         )}
@@ -641,17 +705,8 @@ export const DisabilityReport: React.FC = () => {
             <tfoot>
               <tr className="bg-indigo-50 font-bold">
                 <td className="p-3 border-t border-r border-indigo-100 text-right text-indigo-900 text-sm">TỔNG CỘNG CHUNG:</td>
-                {months.map(m => {
-                  const mTotal = versions.reduce((sum, v) => sum + (weekMatrix[v.name]?.[m] || 0), 0);
-                  return (
-                    <td key={m} className="p-3 border-t border-r border-indigo-100 text-indigo-700">
-                      {mTotal}
-                    </td>
-                  );
-                })}
-                <td className="p-3 border-t border-indigo-100 text-red-600 text-lg">
-                  {months.reduce((gSum, m) => gSum + versions.reduce((sum, v) => sum + (weekMatrix[v.name]?.[m] || 0), 0), 0)} <span className="text-sm font-normal text-red-400">tuần</span>
-                </td>
+                {months.map(m => <td key={m} className="p-3 border-t border-r border-indigo-100 text-indigo-700">{versions.reduce((sum, v) => sum + (weekMatrix[v.name]?.[m] || 0), 0)}</td>)}
+                <td className="p-3 border-t border-indigo-100 text-red-600 text-lg">{months.reduce((gSum, m) => gSum + versions.reduce((sum, v) => sum + (weekMatrix[v.name]?.[m] || 0), 0), 0)} <span className="text-sm font-normal text-red-400">tuần</span></td>
               </tr>
             </tfoot>
           </table>
@@ -661,85 +716,39 @@ export const DisabilityReport: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex items-center mb-4 border-b pb-2 border-gray-100">
-              <Calendar className="w-5 h-5 mr-2 text-indigo-500" />
-              <h3 className="font-bold text-gray-800">Thời gian áp dụng</h3>
-            </div>
+            <div className="flex items-center mb-4 border-b pb-2 border-gray-100"><Calendar className="w-5 h-5 mr-2 text-indigo-500" /><h3 className="font-bold text-gray-800">Thời gian áp dụng</h3></div>
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Học kỳ</label>
-                <select className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.semester} onChange={e => setConfig({...config, semester: e.target.value})}>
-                  <option value="I">Học kỳ I</option>
-                  <option value="II">Học kỳ II</option>
-                  <option value="Hè">Dạy Hè</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Năm học</label>
-                <input type="text" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.schoolYear} onChange={e => setConfig({...config, schoolYear: e.target.value})} placeholder="VD: 2025-2026"/>
-              </div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Học kỳ</label><select className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.semester} onChange={e => setConfig({...config, semester: e.target.value})}><option value="I">Học kỳ I</option><option value="II">Học kỳ II</option><option value="Hè">Dạy Hè</option></select></div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Năm học</label><input type="text" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.schoolYear} onChange={e => setConfig({...config, schoolYear: e.target.value})} placeholder="VD: 2025-2026"/></div>
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Từ tháng</label>
-                  <input type="number" min="1" max="12" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.startMonth} onChange={e => setConfig({...config, startMonth: Number(e.target.value)})}/>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">Đến tháng</label>
-                  <input type="number" min="1" max="12" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.endMonth} onChange={e => setConfig({...config, endMonth: Number(e.target.value)})}/>
-                </div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Từ tháng</label><input type="number" min="1" max="12" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.startMonth} onChange={e => setConfig({...config, startMonth: Number(e.target.value)})}/></div>
+                <div><label className="block text-xs font-bold text-gray-600 mb-1">Đến tháng</label><input type="number" min="1" max="12" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.endMonth} onChange={e => setConfig({...config, endMonth: Number(e.target.value)})}/></div>
               </div>
             </div>
           </div>
 
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex items-center mb-4 border-b pb-2 border-gray-100">
-              <PenTool className="w-5 h-5 mr-2 text-indigo-500" />
-              <h3 className="font-bold text-gray-800">Thông tin Chữ ký</h3>
-            </div>
+            <div className="flex items-center mb-4 border-b pb-2 border-gray-100"><PenTool className="w-5 h-5 mr-2 text-indigo-500" /><h3 className="font-bold text-gray-800">Thông tin Chữ ký</h3></div>
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Hiệu trưởng</label>
-                <input type="text" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.principal} onChange={e => setConfig({...config, principal: e.target.value})}/>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Phó Hiệu trưởng</label>
-                <input type="text" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.vicePrincipal} onChange={e => setConfig({...config, vicePrincipal: e.target.value})}/>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Tổ trưởng CM (Nếu có)</label>
-                <input type="text" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.ttcm} onChange={e => setConfig({...config, ttcm: e.target.value})} placeholder="Để trống nếu tự ký"/>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Ngày tháng góc ký</label>
-                <input type="text" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" value={config.exportDate} onChange={e => setConfig({...config, exportDate: e.target.value})} placeholder="VD: tháng 5 năm 2026"/>
-              </div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Hiệu trưởng</label><input type="text" className="w-full p-2 border border-gray-300 rounded-lg outline-none text-sm" value={config.principal} onChange={e => setConfig({...config, principal: e.target.value})}/></div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Phó Hiệu trưởng</label><input type="text" className="w-full p-2 border border-gray-300 rounded-lg outline-none text-sm" value={config.vicePrincipal} onChange={e => setConfig({...config, vicePrincipal: e.target.value})}/></div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Tổ trưởng CM (Nếu có)</label><input type="text" className="w-full p-2 border border-gray-300 rounded-lg outline-none text-sm" value={config.ttcm} onChange={e => setConfig({...config, ttcm: e.target.value})} placeholder="Trống nếu xuất nhiều Tổ"/></div>
+              <div><label className="block text-xs font-bold text-gray-600 mb-1">Ngày tháng góc ký</label><input type="text" className="w-full p-2 border border-gray-300 rounded-lg outline-none text-sm" value={config.exportDate} onChange={e => setConfig({...config, exportDate: e.target.value})} placeholder="VD: tháng 5 năm 2026"/></div>
             </div>
           </div>
         </div>
 
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex items-center mb-5 border-b pb-3 border-gray-100">
-              <Users className="w-5 h-5 mr-2 text-indigo-600" />
-              <h3 className="font-bold text-gray-800 text-lg">Danh sách Lớp có học sinh khuyết tật</h3>
-            </div>
+            <div className="flex items-center mb-5 border-b pb-3 border-gray-100"><Users className="w-5 h-5 mr-2 text-indigo-600" /><h3 className="font-bold text-gray-800 text-lg">Danh sách Học sinh khuyết tật</h3></div>
 
             <div className="flex flex-col sm:flex-row gap-2 mb-6 bg-gray-50 p-3 rounded-lg border border-gray-100">
               <select className="w-full sm:w-1/3 p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={newClass} onChange={e => setNewClass(e.target.value)}>
                 <option value="">-- Chọn Lớp --</option>
                 {allClassNames.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <input 
-                type="text" 
-                placeholder="Họ và tên học sinh khuyết tật..." 
-                className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                value={newName}
-                onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddStudent()}
-              />
-              <button onClick={handleAddStudent} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center text-sm font-bold transition-colors">
-                <Plus className="w-4 h-4 mr-1" /> Thêm
-              </button>
+              <input type="text" placeholder="Họ và tên học sinh khuyết tật..." className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddStudent()}/>
+              <button onClick={handleAddStudent} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center justify-center text-sm font-bold transition-colors"><Plus className="w-4 h-4 mr-1" /> Thêm</button>
             </div>
 
             <div className="flex items-center justify-between mb-3 mt-4">
@@ -749,19 +758,13 @@ export const DisabilityReport: React.FC = () => {
                   <Upload className="w-3.5 h-3.5 mr-1" /> Nhập từ file
                   <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleRestoreStudents} />
                 </label>
-                <button 
-                  onClick={handleBackupStudents}
-                  disabled={students.length === 0}
-                  className="flex items-center px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs font-bold transition-colors border border-emerald-100"
-                >
-                  <Save className="w-3.5 h-3.5 mr-1" /> Lưu danh sách
-                </button>
+                <button onClick={handleBackupStudents} disabled={students.length === 0} className="flex items-center px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 rounded-md text-xs font-bold transition-colors border border-emerald-100"><Save className="w-3.5 h-3.5 mr-1" /> Lưu danh sách</button>
               </div>
             </div>
 
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="border border-gray-200 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
               <table className="w-full text-left">
-                <thead className="bg-gray-50 border-b border-gray-200">
+                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                   <tr>
                     <th className="p-3 text-sm font-bold text-gray-600 w-16 text-center">STT</th>
                     <th className="p-3 text-sm font-bold text-gray-600 w-24 text-center">LỚP</th>
@@ -770,47 +773,46 @@ export const DisabilityReport: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {students.map((student, idx) => (
+                  {/* Hiển thị danh sách sau khi đã sắp xếp sơ bộ cho dễ nhìn */}
+                  {[...students]
+                    .sort((a, b) => a.className.localeCompare(b.className, 'vi', { numeric: true }))
+                    .map((student, idx) => (
                     <tr key={student.id} className="hover:bg-gray-50/50">
                       <td className="p-3 text-center text-gray-500 font-medium">{idx + 1}</td>
                       <td className="p-3 text-center font-bold text-indigo-600">{student.className}</td>
                       <td className="p-3 font-bold text-gray-800">{student.studentName}</td>
-                      <td className="p-3 text-center">
-                        <button onClick={() => handleRemoveStudent(student.id)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition-colors">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </td>
+                      <td className="p-3 text-center"><button onClick={() => handleRemoveStudent(student.id)} className="text-gray-400 hover:text-red-500 p-1.5 rounded-md hover:bg-red-50 transition-colors"><Trash2 className="w-5 h-5" /></button></td>
                     </tr>
                   ))}
-                  {students.length === 0 && (
-                    <tr><td colSpan={4} className="p-8 text-center text-gray-500 italic">Chưa khai báo học sinh. Hãy chọn Lớp và điền Tên HS ở trên.</td></tr>
-                  )}
+                  {students.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-500 italic">Chưa khai báo học sinh. Hãy chọn Lớp và điền Tên HS ở trên.</td></tr>}
                 </tbody>
               </table>
             </div>
             
             <div className="mt-6 pt-5 border-t border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="text-sm text-gray-500">
-                Tổng cộng: <strong className="text-indigo-600">{students.length}</strong> học sinh
-              </div>
-              
-              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                <select 
-                  className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full sm:w-56 shadow-sm"
-                  value={selectedExportDept}
-                  onChange={(e) => setSelectedExportDept(e.target.value)}
-                >
-                  <option value="">Xuất Tất cả các Tổ</option>
-                  {dynamicDepartments.map(d => <option key={d} value={d}>Chỉ xuất Tổ {d}</option>)}
-                </select>
+              <select 
+                className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full sm:w-56 shadow-sm"
+                value={selectedExportDept} onChange={(e) => setSelectedExportDept(e.target.value)}
+              >
+                <option value="">-- Xuất Tất cả các Tổ --</option>
+                {dynamicDepartments.map(d => <option key={d} value={d}>Lọc riêng Tổ {d}</option>)}
+              </select>
 
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
                 <button 
-                  onClick={handleExportExcel}
+                  onClick={handleExportExcelPhuLuc1}
                   disabled={students.length === 0 || isExporting || versions.length === 0}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-xl flex items-center justify-center text-base font-bold transition-colors shadow-sm w-full sm:w-auto"
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-5 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-colors shadow-sm w-full sm:w-auto"
+                  title="Phụ lục 1 luôn xuất Toàn trường theo Lớp"
                 >
-                  {isExporting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}
-                  {isExporting ? 'Đang tạo Excel...' : 'Xuất Báo Cáo (Mẫu 1)'}
+                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />} Phụ Lục 1 (Theo HS)
+                </button>
+                <button 
+                  onClick={handleExportExcelMau1}
+                  disabled={students.length === 0 || isExporting || versions.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-5 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-colors shadow-sm w-full sm:w-auto"
+                >
+                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} Mẫu 1 (Theo GV)
                 </button>
               </div>
             </div>

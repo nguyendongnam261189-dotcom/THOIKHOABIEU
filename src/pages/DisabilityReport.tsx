@@ -118,7 +118,7 @@ export const DisabilityReport: React.FC = () => {
     setStudents(students.filter(s => s.id !== id));
   };
 
-  // 🔥 TÍNH NĂNG MỚI: XUẤT VÀ NHẬP DANH SÁCH HỌC SINH BẰNG EXCEL
+  // TÍNH NĂNG: XUẤT VÀ NHẬP DANH SÁCH HỌC SINH BẰNG EXCEL
   const handleBackupStudents = async () => {
     if (students.length === 0) return;
     try {
@@ -158,7 +158,7 @@ export const DisabilityReport: React.FC = () => {
 
       const importedStudents: DisabledStudent[] = [];
       ws.eachRow((row, rowNumber) => {
-        if (rowNumber > 1) { // Bỏ qua dòng tiêu đề
+        if (rowNumber > 1) { 
           const className = row.getCell(1).text?.trim();
           const studentName = row.getCell(2).text?.trim();
           if (className && studentName) {
@@ -172,7 +172,7 @@ export const DisabilityReport: React.FC = () => {
       });
 
       if (importedStudents.length > 0) {
-        setStudents(importedStudents); // Ghi đè danh sách hiện tại
+        setStudents(importedStudents); 
         alert(`Đã tải thành công ${importedStudents.length} học sinh từ file Excel!`);
       } else {
         alert("Không tìm thấy dữ liệu hợp lệ trong file Excel. Vui lòng kiểm tra lại cấu trúc cột.");
@@ -181,22 +181,13 @@ export const DisabilityReport: React.FC = () => {
       console.error(error);
       alert("Lỗi khi đọc file Excel!");
     } finally {
-      // Reset ô chọn file để có thể chọn lại file đó nếu cần
       e.target.value = '';
     }
   };
 
-
   const isHDTNType = (subject: string): boolean => {
     const s = (subject || '').toUpperCase();
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
-  };
-
-  const getHomeroomTeacher = (className: string): string | null => {
-    const hrSchedule = allSchedules.find(s => 
-      s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon)
-    );
-    return hrSchedule && hrSchedule.giao_vien !== 'Chưa rõ' ? hrSchedule.giao_vien : null;
   };
 
   // =====================================================================
@@ -216,7 +207,6 @@ export const DisabilityReport: React.FC = () => {
       const M = months.length; 
       const TOTAL_COLS = 4 + M + 2; 
 
-      // BIẾN LƯU TRỮ DỮ LIỆU
       const teacherDataMap = new Map<string, { dept: string, subjects: Set<string>, records: any[], totalPeriods: number }>();
       const deptDataMap = new Map<string, { totalPeriods: number, teachers: { name: string, total: number }[] }>();
       let grandTotal = 0;
@@ -228,17 +218,11 @@ export const DisabilityReport: React.FC = () => {
         
         classSchedules.forEach(s => {
           if (s.giao_vien === 'Chưa rõ') return;
+          // Quy tất cả các tiết GVCN thành môn 'HĐTN' chuẩn
           const subject = isHDTNType(s.mon) ? 'HĐTN' : s.mon;
           const key = `${s.giao_vien}|${subject}`;
           if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
         });
-
-        // Gán tự động môn GVCN
-        const gvcn = getHomeroomTeacher(student.className);
-        if (gvcn) {
-          const gvcnKey = `${gvcn}|Công tác GVCN`;
-          if (!tsMap.has(gvcnKey)) tsMap.set(gvcnKey, { teacher: gvcn, subject: 'Công tác GVCN' });
-        }
 
         tsMap.forEach(combo => {
           const monthlyDetails: Record<number, Record<number, number>> = {};
@@ -250,9 +234,8 @@ export const DisabilityReport: React.FC = () => {
             let count = 0; 
             const vSchedules = classSchedules.filter(s => s.versionName === vName && s.giao_vien === combo.teacher);
             
-            if (combo.subject === 'Công tác GVCN') {
-              count = 1; 
-            } else if (combo.subject === 'HĐTN') {
+            // Nếu là HĐTN (GVCN) thì luôn ấn định là 3 tiết
+            if (combo.subject === 'HĐTN') {
               count = vSchedules.some(s => isHDTNType(s.mon)) ? 3 : 0; 
             } else {
               count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
@@ -310,7 +293,6 @@ export const DisabilityReport: React.FC = () => {
         grandTotal += tData.totalPeriods;
       });
 
-      // Sắp xếp tên giáo viên trong tổ theo ABC
       deptDataMap.forEach(dData => {
         dData.teachers.sort((a, b) => {
           const nameA = String(a.name).split(' ').pop() || '';
@@ -402,7 +384,7 @@ export const DisabilityReport: React.FC = () => {
         ws.getColumn(1).width = 6;  
         ws.getColumn(2).width = 12; 
         ws.getColumn(3).width = 25; 
-        ws.getColumn(4).width = 15; 
+        ws.getColumn(4).width = 16; 
         for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 16; 
         ws.getColumn(TOTAL_COLS - 1).width = 13; 
         ws.getColumn(TOTAL_COLS).width = 15;     
@@ -426,9 +408,12 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear} (TỪ THÁNG ${String(config.startMonth).padStart(2,'0')} ĐẾN THÁNG ${String(config.endMonth).padStart(2,'0')} NĂM ${config.exportDate.split('năm')[1]?.trim() || ''})`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
         r += 2;
 
+        // Đổi tên "HĐTN" thành "HĐTN (GVCN)" để in lên đầu Header cho dễ hiểu
+        const displaySubjects = Array.from(tData.subjects).map(s => s === 'HĐTN' ? 'HĐTN (GVCN)' : s);
+
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Giáo viên giảng dạy: ${teacherName}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
-        ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${Array.from(tData.subjects).join(', ')}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
+        ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${displaySubjects.join(', ')}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
 
         ws.mergeCells(`A${r}:A${r+1}`); ws.getCell(`A${r}`).value = 'STT';
@@ -462,8 +447,9 @@ export const DisabilityReport: React.FC = () => {
           row.getCell(2).value = rec.className;
           row.getCell(3).value = rec.studentName;
           
-          row.getCell(4).value = rec.subject;
-          if (rec.subject === 'Công tác GVCN') {
+          // Nêu bật môn HĐTN (GVCN)
+          row.getCell(4).value = rec.subject === 'HĐTN' ? 'HĐTN (GVCN)' : rec.subject;
+          if (rec.subject === 'HĐTN') {
             row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
           }
           
@@ -584,7 +570,7 @@ export const DisabilityReport: React.FC = () => {
           <FileSpreadsheet className="mr-2.5 text-emerald-600 h-7 w-7" /> 
           Báo cáo Kê khai Giờ dạy Khuyết tật (Mẫu 1)
         </h2>
-        <p className="text-sm text-gray-500 mt-1">Hệ thống phân chia 2 cấp độ Báo cáo: In từng Tổ sẽ kèm danh sách Chi tiết GV. In Toàn trường sẽ xuất Báo cáo Tổng hợp (1 trang Toàn trường và các trang Tổng của từng Tổ).</p>
+        <p className="text-sm text-gray-500 mt-1">Hệ thống phân bổ tự động số tiết dạy vào từng tháng dựa trên Ma trận thực dạy.</p>
       </div>
 
       {/* ===================================================================== */}

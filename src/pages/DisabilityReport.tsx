@@ -168,6 +168,21 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
+  // 🔥 HÀM CHUẨN HÓA TÊN MÔN HỌC (GỘP LÝ, HÓA, SINH, KHTN...)
+  const formatSubjectName = (rawName: string): string => {
+    if (!rawName) return '';
+    const upperName = rawName.toUpperCase().trim();
+    if (isHDTNType(upperName)) return 'HĐTN';
+    
+    // Gộp tất cả các biến thể của KHTN thành một mối
+    const khtnVariants = ['LÝ', 'HÓA', 'SINH', 'KHTN', 'KHTN 1', 'KHTN 2', 'KHTN 3', 'KHTN1', 'KHTN2', 'KHTN3'];
+    if (khtnVariants.includes(upperName)) {
+      return 'KHTN';
+    }
+    
+    return rawName.trim();
+  };
+
   const getHomeroomTeacher = (className: string): string | null => {
     const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon));
     if (classSchedules.length === 0) return null;
@@ -206,7 +221,7 @@ export const DisabilityReport: React.FC = () => {
       const tsMap = new Map<string, { teacher: string, subject: string }>();
       classSchedules.forEach(s => {
         if (s.giao_vien === 'Chưa rõ') return;
-        const subject = isHDTNType(s.mon) ? 'HĐTN' : s.mon;
+        const subject = formatSubjectName(s.mon); // Gọi hàm chuẩn hóa tên môn
         const key = `${s.giao_vien}|${subject}`;
         if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
       });
@@ -231,7 +246,8 @@ export const DisabilityReport: React.FC = () => {
               count = 3;
             }
           } else {
-            count = vSchedules.filter(s => !isHDTNType(s.mon) && s.mon === combo.subject).length;
+            // Đếm tất cả các tiết mà sau khi chuẩn hóa có tên bằng với combo.subject
+            count = vSchedules.filter(s => !isHDTNType(s.mon) && formatSubjectName(s.mon) === combo.subject).length;
           }
 
           if (count > 0) {
@@ -571,7 +587,7 @@ export const DisabilityReport: React.FC = () => {
   };
 
   // =====================================================================
-  // 👉 XUẤT EXCEL 3: BÁO CÁO THEO MÔN HỌC (TÍNH NĂNG MỚI)
+  // 👉 XUẤT EXCEL 3: BÁO CÁO THEO MÔN HỌC
   // =====================================================================
   const handleExportExcelTheoMon = async () => {
     if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
@@ -603,7 +619,6 @@ export const DisabilityReport: React.FC = () => {
       }
       r++;
 
-      // Kéo dữ liệu từ Lõi Trung Tâm
       const masterRecords = buildMasterRecords();
       const subjectMap = new Map<string, Map<string, number>>();
       let grandTotal = 0;
@@ -644,7 +659,7 @@ export const DisabilityReport: React.FC = () => {
               const row = ws.getRow(r);
               row.height = 25;
               row.getCell(1).value = globalStt++;
-              row.getCell(2).value = subj;
+              row.getCell(2).value = subj === 'HĐTN' ? 'HĐTN (GVCN)' : subj;
               row.getCell(3).value = tName;
               row.getCell(4).value = tTotal;
               row.getCell(5).value = '';
@@ -667,7 +682,7 @@ export const DisabilityReport: React.FC = () => {
           const subRow = ws.getRow(r);
           subRow.height = 25;
           ws.mergeCells(`A${r}:C${r}`);
-          subRow.getCell(1).value = `Tổng cộng môn ${subj}`;
+          subRow.getCell(1).value = `Tổng cộng môn ${subj === 'HĐTN' ? 'HĐTN (GVCN)' : subj}`;
           subRow.getCell(4).value = subjTotal;
           for(let i=1; i<=5; i++) {
              const c = subRow.getCell(i);

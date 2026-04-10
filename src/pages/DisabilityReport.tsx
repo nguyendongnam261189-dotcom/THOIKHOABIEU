@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle, Upload, Save, FileText } from 'lucide-react';
+import { FileSpreadsheet, Settings, Users, Plus, Trash2, Download, Calendar, PenTool, Loader2, TableProperties, AlertTriangle, Upload, Save, FileText, PieChart } from 'lucide-react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
@@ -12,7 +12,7 @@ interface DisabledStudent {
   studentName: string;
 }
 
-// Lõi dữ liệu chung để đồng bộ 100% giữa Mẫu 1 và Phụ lục 1
+// Lõi dữ liệu chung để đồng bộ 100% giữa Mẫu 1, Phụ lục 1 và Báo cáo theo Môn
 interface MasterRecord {
   student: DisabledStudent;
   teacher: string;
@@ -168,15 +168,40 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
+  const getHomeroomTeacher = (className: string): string | null => {
+    const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(className) && isHDTNType(s.mon));
+    if (classSchedules.length === 0) return null;
+
+    const teacherCounts = new Map<string, number>();
+    classSchedules.forEach(s => {
+        if (s.giao_vien === 'Chưa rõ') return;
+        teacherCounts.set(s.giao_vien, (teacherCounts.get(s.giao_vien) || 0) + 1);
+    });
+
+    if (teacherCounts.size === 0) return null;
+
+    let topTeacher = null;
+    let maxCount = -1;
+    teacherCounts.forEach((count, teacherName) => {
+        if (count > maxCount) {
+            maxCount = count;
+            topTeacher = teacherName;
+        }
+    });
+
+    return topTeacher;
+  };
+
+
   // =====================================================================
   // 🔥 LÕI TÍNH TOÁN TRUNG TÂM (UNIFIED CORE)
-  // Xử lý động việc đổi GVCN giữa các TKB
   // =====================================================================
   const buildMasterRecords = (): MasterRecord[] => {
     const masterRecords: MasterRecord[] = [];
 
     students.forEach(student => {
       const classSchedules = allSchedules.filter(s => s.lop.split(',').map(c => c.trim()).includes(student.className));
+      const gvcn = getHomeroomTeacher(student.className);
 
       const tsMap = new Map<string, { teacher: string, subject: string }>();
       classSchedules.forEach(s => {
@@ -186,6 +211,11 @@ export const DisabilityReport: React.FC = () => {
         if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
       });
 
+      if (gvcn) {
+        const gvcnKey = `${gvcn}|HĐTN`;
+        if (!tsMap.has(gvcnKey)) tsMap.set(gvcnKey, { teacher: gvcn, subject: 'HĐTN' });
+      }
+
       tsMap.forEach(combo => {
         const monthlyDetails: Record<number, Record<number, number>> = {};
         let totalP = 0;
@@ -194,13 +224,9 @@ export const DisabilityReport: React.FC = () => {
           const vName = v.name;
           const matrixV = weekMatrix[vName] || {};
           let count = 0; 
-          
-          // Lấy chính xác lịch của Giáo viên này, Môn này, trong TKB vName, tại Lớp student.className
           const vSchedules = classSchedules.filter(s => (s.versionName || 'Mặc định') === vName && s.giao_vien === combo.teacher);
           
           if (combo.subject === 'HĐTN') {
-            // 🔥 LUẬT MỚI: Check xem trong TKB cụ thể này, giáo viên có tiết HĐTN/SHL nào không?
-            // Nếu CÓ -> Chính là GVCN của TKB này -> Auto chốt 3 tiết
             if (vSchedules.some(s => isHDTNType(s.mon))) {
               count = 3;
             }
@@ -239,7 +265,7 @@ export const DisabilityReport: React.FC = () => {
 
 
   // =====================================================================
-  // 3A. XUẤT EXCEL: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN & TỔNG HỢP TỔ)
+  // 👉 XUẤT EXCEL 1: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN & TỔNG HỢP TỔ)
   // =====================================================================
   const handleExportExcelMau1 = async () => {
     if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
@@ -251,7 +277,6 @@ export const DisabilityReport: React.FC = () => {
       const M = months.length; 
       const TOTAL_COLS = 4 + M + 2; 
 
-      // 🔥 Kéo dữ liệu từ Lõi Trung Tâm
       const masterRecords = buildMasterRecords();
       if (masterRecords.length === 0) {
         alert("Không tìm thấy dữ liệu tiết dạy nào!");
@@ -429,8 +454,9 @@ export const DisabilityReport: React.FC = () => {
     } catch (error) { console.error(error); alert("Lỗi xuất Mẫu 1!"); } finally { setIsExporting(false); }
   };
 
-
-  // 👉 HÀM XUẤT PHỤ LỤC 1 (GOM THEO HỌC SINH - ĐỒNG BỘ 100% VỚI LÕI)
+  // =====================================================================
+  // 👉 XUẤT EXCEL 2: PHỤ LỤC 1 (GOM THEO HỌC SINH)
+  // =====================================================================
   const handleExportExcelPhuLuc1 = async () => {
     if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
     setIsExporting(true);
@@ -461,9 +487,7 @@ export const DisabilityReport: React.FC = () => {
       }
       r++;
 
-      // 🔥 LẤY DỮ LIỆU TỪ LÕI TRUNG TÂM
       const masterRecords = buildMasterRecords();
-      
       const pl1Data = new Map<string, { student: DisabledStudent, teachers: Map<string, number> }>();
       
       const sortedRecords = [...masterRecords].sort((a, b) => {
@@ -472,7 +496,6 @@ export const DisabilityReport: React.FC = () => {
           return a.student.studentName.localeCompare(b.student.studentName, 'vi');
       });
 
-      // Gộp những giáo viên dạy >1 môn cho 1 học sinh (Cộng tổng lại)
       sortedRecords.forEach(rec => {
           const sKey = rec.student.id;
           if (!pl1Data.has(sKey)) pl1Data.set(sKey, { student: rec.student, teachers: new Map() });
@@ -487,7 +510,6 @@ export const DisabilityReport: React.FC = () => {
       pl1Data.forEach((sData) => {
         let filteredTeachers = Array.from(sData.teachers.entries()).map(([name, total]) => ({name, total}));
         
-        // Lọc Tổ (Nếu có chọn)
         if (selectedExportDept) {
            filteredTeachers = filteredTeachers.filter(t => {
                const tInfo = teachers.find(x => x.name === t.name);
@@ -548,6 +570,135 @@ export const DisabilityReport: React.FC = () => {
     } finally { setIsExporting(false); }
   };
 
+  // =====================================================================
+  // 👉 XUẤT EXCEL 3: BÁO CÁO THEO MÔN HỌC (TÍNH NĂNG MỚI)
+  // =====================================================================
+  const handleExportExcelTheoMon = async () => {
+    if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
+    setIsExporting(true);
+
+    try {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Theo_Mon');
+
+      ws.pageSetup = { paperSize: 9, orientation: 'portrait', margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+      ws.columns = [ { width: 6 }, { width: 25 }, { width: 35 }, { width: 15 }, { width: 20 } ];
+
+      let r = 1;
+      ws.getCell(`E${r}`).value = 'Thống kê theo Môn'; ws.getCell(`E${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`E${r}`).alignment = { horizontal: 'right' }; r++;
+      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'TRƯỜNG THCS NGUYỄN BỈNH KHIÊM'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
+      
+      const filterText = selectedExportDept ? `(TỔ ${selectedExportDept.toUpperCase()})` : '(TOÀN TRƯỜNG)';
+      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `BẢNG THỐNG KÊ SỐ TIẾT DẠY KHUYẾT TẬT THEO MÔN HỌC ${filterText}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
+
+      const header = ws.getRow(r);
+      header.values = ['TT', 'Môn học', 'Giáo viên giảng dạy', 'Tổng số tiết', 'Ghi chú'];
+      header.height = 30;
+      for(let i=1; i<=5; i++) {
+        const c = header.getCell(i); c.font = { bold: true, name: 'Times New Roman', size: 12 };
+        c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+      }
+      r++;
+
+      // Kéo dữ liệu từ Lõi Trung Tâm
+      const masterRecords = buildMasterRecords();
+      const subjectMap = new Map<string, Map<string, number>>();
+      let grandTotal = 0;
+
+      masterRecords.forEach(rec => {
+        const tInfo = teachers.find(t => t.name === rec.teacher);
+        const tGroup = tInfo?.group || 'Chung';
+        
+        if (selectedExportDept && tGroup !== selectedExportDept) return;
+
+        const subj = rec.subject;
+        if (!subjectMap.has(subj)) subjectMap.set(subj, new Map());
+        
+        const tMap = subjectMap.get(subj)!;
+        tMap.set(rec.teacher, (tMap.get(rec.teacher) || 0) + rec.totalP);
+        grandTotal += rec.totalP;
+      });
+
+      if (subjectMap.size === 0) {
+          alert("Không có dữ liệu phù hợp với bộ lọc!"); setIsExporting(false); return;
+      }
+
+      const sortedSubjects = Array.from(subjectMap.keys()).sort((a, b) => a.localeCompare(b, 'vi'));
+      let globalStt = 1;
+
+      sortedSubjects.forEach(subj => {
+          const tMap = subjectMap.get(subj)!;
+          const sortedTeachers = Array.from(tMap.entries()).sort((a, b) => {
+              const nameA = a[0].split(' ').pop() || '';
+              const nameB = b[0].split(' ').pop() || '';
+              return nameA.localeCompare(nameB, 'vi');
+          });
+
+          let subjTotal = 0;
+          const startR = r;
+
+          sortedTeachers.forEach(([tName, tTotal]) => {
+              const row = ws.getRow(r);
+              row.height = 25;
+              row.getCell(1).value = globalStt++;
+              row.getCell(2).value = subj;
+              row.getCell(3).value = tName;
+              row.getCell(4).value = tTotal;
+              row.getCell(5).value = '';
+              
+              for(let i=1; i<=5; i++) {
+                const c = row.getCell(i);
+                c.font = { name: 'Times New Roman', size: 12 };
+                c.alignment = { horizontal: i===2||i===3 ? 'left' : 'center', vertical: 'middle' };
+                c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+              }
+              subjTotal += tTotal;
+              r++;
+          });
+
+          if (sortedTeachers.length > 1) {
+              ws.mergeCells(startR, 2, r - 1, 2);
+              ws.getCell(startR, 2).alignment = { vertical: 'middle', horizontal: 'center' };
+          }
+
+          const subRow = ws.getRow(r);
+          subRow.height = 25;
+          ws.mergeCells(`A${r}:C${r}`);
+          subRow.getCell(1).value = `Tổng cộng môn ${subj}`;
+          subRow.getCell(4).value = subjTotal;
+          for(let i=1; i<=5; i++) {
+             const c = subRow.getCell(i);
+             c.font = { bold: true, name: 'Times New Roman', size: 12, italic: true };
+             c.alignment = { horizontal: i===1 ? 'right' : 'center', vertical: 'middle' };
+             if (i===1 || i===4 || i===5) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+          }
+          r++;
+      });
+
+      const footR = ws.getRow(r); footR.height = 30; ws.mergeCells(`A${r}:C${r}`);
+      footR.getCell(1).value = 'TỔNG CỘNG CHUNG'; footR.getCell(4).value = grandTotal;
+      for(let i=1; i<=5; i++) {
+        const c = footR.getCell(i); c.font = { bold: true, name: 'Times New Roman', size: 13, color: { argb: 'FF0000' } }; c.alignment = { horizontal: 'center', vertical: 'middle' };
+        if(i===1 || i===4 || i===5) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+      }
+      r += 2;
+
+      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'Người lập bảng'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+      ws.mergeCells(`D${r}:E${r}`); ws.getCell(`D${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}\nHiệu trưởng`; ws.getCell(`D${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`D${r}`).alignment = { horizontal: 'center', wrapText: true };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Bao_Cao_Theo_Mon_${selectedExportDept ? selectedExportDept.replace(/\s+/g, '_') : 'Toan_Truong'}_HK${config.semester}.xlsx`);
+
+    } catch (error) { 
+      console.error(error); alert("Lỗi xuất báo cáo theo môn!"); 
+    } finally { setIsExporting(false); }
+  };
+
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-10 relative">
       {loadingData && (
@@ -561,7 +712,7 @@ export const DisabilityReport: React.FC = () => {
           <FileSpreadsheet className="mr-2.5 text-emerald-600 h-7 w-7" /> 
           Báo cáo Kê khai Giờ dạy Khuyết tật
         </h2>
-        <p className="text-sm text-gray-500 mt-1">Quản lý ma trận tuần và xuất 2 loại báo cáo: Mẫu 1 (Theo Tổ) và Phụ lục 1 (Tổng hợp theo Lớp). Thuật toán lõi đã được đồng bộ 100%.</p>
+        <p className="text-sm text-gray-500 mt-1">Quản lý ma trận tuần và xuất 3 loại báo cáo với dữ liệu đồng bộ tuyệt đối 100%.</p>
       </div>
 
       {/* ===================================================================== */}
@@ -702,7 +853,7 @@ export const DisabilityReport: React.FC = () => {
             
             <div className="mt-6 pt-5 border-t border-gray-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <select 
-                className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full sm:w-56 shadow-sm"
+                className="px-4 py-3 border border-emerald-300 rounded-xl text-sm font-bold text-emerald-900 bg-emerald-50 outline-none focus:border-emerald-500 w-full sm:w-56 shadow-sm shrink-0"
                 value={selectedExportDept} onChange={(e) => setSelectedExportDept(e.target.value)}
               >
                 <option value="">-- Xuất Tất cả các Tổ --</option>
@@ -715,14 +866,21 @@ export const DisabilityReport: React.FC = () => {
                   disabled={students.length === 0 || isExporting || versions.length === 0}
                   className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-5 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-colors shadow-sm w-full sm:w-auto"
                 >
-                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />} Phụ Lục 1 (Theo HS)
+                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />} Phụ Lục 1 (HS)
                 </button>
                 <button 
                   onClick={handleExportExcelMau1}
                   disabled={students.length === 0 || isExporting || versions.length === 0}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-5 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-colors shadow-sm w-full sm:w-auto"
                 >
-                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} Mẫu 1 (Theo GV)
+                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />} Mẫu 1 (GV)
+                </button>
+                <button 
+                  onClick={handleExportExcelTheoMon}
+                  disabled={students.length === 0 || isExporting || versions.length === 0}
+                  className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-5 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-colors shadow-sm w-full sm:w-auto"
+                >
+                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <PieChart className="w-4 h-4 mr-2" />} Theo Môn
                 </button>
               </div>
             </div>

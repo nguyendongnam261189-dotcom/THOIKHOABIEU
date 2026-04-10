@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Schedule, Teacher } from '../types';
 import { scheduleService } from '../services/scheduleService';
 import { teacherService } from '../services/teacherService';
-import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2, ShieldAlert, Layers } from 'lucide-react';
+import { Users, Search, CheckCircle, AlertCircle, Calendar, Printer, X, Copy, Check, Download, Image as ImageIcon, Loader2, ShieldAlert, Layers, ChevronDown, Filter } from 'lucide-react';
 import { normalizeSubjectName } from '../utils/subjectUtils';
 import { toBlob } from 'html-to-image'; 
 
@@ -46,6 +46,12 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
 
+  // 🔥 STATES CHO TÌM KIẾM VÀ LỌC GIÁO VIÊN
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterGroup, setFilterGroup] = useState<string>('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   const getDefaultDateString = () => {
     const today = new Date();
     const day = today.getDate().toString().padStart(2, '0');
@@ -77,7 +83,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       const allTeachers = await teacherService.getAllTeachers();
       setAllSchedules(schedulesData);
       
-      // 🔥 TRÍCH XUẤT PHIÊN BẢN
       const uniqueVersions = Array.from(new Set(schedulesData.map(s => s.versionName || 'Mặc định'))).sort().reverse();
       setVersions(uniqueVersions);
       if (uniqueVersions.length > 0 && !selectedVersion) {
@@ -100,10 +105,33 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     fetchData();
   }, [isTeacherRole, role, department]);
 
-  // 🔥 LỌC LỊCH THEO PHIÊN BẢN ĐÃ CHỌN
+  // Click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const schedules = useMemo(() => {
     return allSchedules.filter(s => (s.versionName || 'Mặc định') === selectedVersion);
   }, [allSchedules, selectedVersion]);
+
+  const dynamicDepartments = useMemo(() => {
+    return Array.from(new Set(teachers.map(t => t.group))).filter(Boolean).sort();
+  }, [teachers]);
+
+  // Lọc danh sách giáo viên dựa trên Search và Group
+  const filteredTeachers = useMemo(() => {
+    return teachers.filter(t => {
+      const matchesSearch = t.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesGroup = filterGroup ? t.group === filterGroup : true;
+      return matchesSearch && matchesGroup;
+    });
+  }, [teachers, searchQuery, filterGroup]);
 
   if (isTeacherRole) {
     return (
@@ -118,12 +146,12 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     );
   }
 
-  const handleAddAbsentTeacher = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    if (val && !selectedAbsentTeachers.includes(val)) {
-      setSelectedAbsentTeachers([...selectedAbsentTeachers, val]);
+  const handleAddAbsentTeacher = (name: string) => {
+    if (name && !selectedAbsentTeachers.includes(name)) {
+      setSelectedAbsentTeachers([...selectedAbsentTeachers, name]);
     }
-    e.target.value = '';
+    setIsDropdownOpen(false);
+    setSearchQuery('');
   };
 
   const handleRemoveAbsentTeacher = (name: string) => {
@@ -139,9 +167,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     if (changed) setAssignments(newAssignments);
   };
 
-  // =====================================================================
-  // 🔥 THUẬT TOÁN ĐỀ XUẤT GIÁO VIÊN DẠY THAY (MỚI: CÓ NHÃN TAGS)
-  // =====================================================================
   const getSuggestions = (slot: ActiveSlot) => {
     const absentTeacher = teachers.find(t => t.name === slot.absentTeacher);
     if (!absentTeacher) return [];
@@ -153,7 +178,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       if (t.group !== group) return false; 
       if (role === 'ttcm' && department && t.group !== department) return false;
 
-      // Lọc cứng: Phải rảnh tiết này
       const isBusy = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period && s.buoi === slot.session);
       return !isBusy;
     });
@@ -162,7 +186,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       let score = 0;
       const tags: { text: string, color: string }[] = [];
 
-      // 1. Chuyên môn (+60)
       const normalizedSlotSubject = normalizeSubjectName(slot.subject);
       const teacherSubjects = t.teachableSubjects?.map(s => normalizeSubjectName(s)) || [];
       let canTeachSubject = teacherSubjects.includes(normalizedSlotSubject);
@@ -183,14 +206,12 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         tags.push({ text: 'Trái môn', color: 'bg-gray-100 text-gray-500 border-gray-200' });
       }
 
-      // 2. Có mặt tại trường buổi đó (+30)
       const classesThisSession = schedules.filter(s => s.giao_vien === t.name && s.thu === slot.day && s.buoi === slot.session).length;
       if (classesThisSession > 0) {
         score += 30;
         tags.push({ text: 'Đang ở trường', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' });
       }
 
-      // 3. Tiết liền kề (+20)
       const hasAdjacentBefore = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period - 1 && s.buoi === slot.session);
       const hasAdjacentAfter = schedules.some(s => s.giao_vien === t.name && s.thu === slot.day && s.tiet === slot.period + 1 && s.buoi === slot.session);
       
@@ -199,7 +220,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
         tags.push({ text: 'Có tiết liền kề', color: 'bg-amber-100 text-amber-800 border-amber-200' });
       }
 
-      // 4. Trừ điểm tải tiết (-1 điểm/tiết)
       const totalClassesWeek = schedules.filter(s => s.giao_vien === t.name).length;
       score -= totalClassesWeek;
 
@@ -214,7 +234,6 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
       return { teacher: t, score, tags, breakdown, totalClassesWeek };
     });
 
-    // Sắp xếp: Điểm cao nhất lên đầu, nếu bằng điểm thì ai ít tiết hơn lên trước
     scored.sort((a, b) => b.score - a.score || a.totalClassesWeek - b.totalClassesWeek);
     return scored;
   };
@@ -371,7 +390,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
     const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
     return (
-      <div key={teacherName} className="mb-6 bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200">
+      <div key={teacherName} className="mb-6 bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <h3 className="text-lg md:text-xl font-bold mb-2 md:mb-4 text-gray-800 flex items-center">
           <Users className="w-5 h-5 mr-2 text-indigo-600" /> {teacherName}
         </h3>
@@ -617,7 +636,7 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center">
               <Users className="mr-2 text-indigo-600 w-6 h-6 md:w-8 md:h-8" /> Phân công Dạy thay
             </h2>
-            <p className="text-sm text-gray-500 mt-1 italic">Vui lòng chọn đúng phiên bản TKB đang áp dụng.</p>
+            <p className="text-sm text-gray-500 mt-1 italic">Hỗ trợ tìm kiếm thông minh và lọc giáo viên theo Tổ.</p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -646,31 +665,83 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
           </div>
         </div>
 
-        <div className="mb-4 md:mb-8">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Chọn giáo viên nghỉ {role === 'ttcm' && `(Chỉ hiển thị Tổ ${department})`}
+        {/* 🔥 THANH TÌM KIẾM VÀ CHỌN GIÁO VIÊN THÔNG MINH */}
+        <div className="mb-4 md:mb-8" ref={dropdownRef}>
+          <label className="block text-sm font-bold text-gray-700 mb-2">
+            Chọn Giáo viên xin nghỉ: {role === 'ttcm' && <span className="text-indigo-600">(Chỉ hiển thị Tổ {department})</span>}
           </label>
-          <select
-            className="w-full md:max-w-md px-4 py-3 md:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white text-base md:text-sm"
-            onChange={handleAddAbsentTeacher}
-            value=""
-          >
-            <option value="">-- Chạm để chọn giáo viên --</option>
-            {teachers.map(t => (
-              <option key={t.id || t.name} value={t.name}>{t.name} ({t.group})</option>
-            ))}
-          </select>
+          
+          <div className="relative">
+            <div 
+              className="flex items-center justify-between w-full md:max-w-md px-4 py-3 bg-white border border-gray-300 rounded-xl cursor-pointer hover:border-indigo-400 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-200 transition-all shadow-sm"
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            >
+              <span className="text-gray-500 text-sm">-- Click để chọn hoặc Gõ tìm kiếm --</span>
+              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+            </div>
+
+            {isDropdownOpen && (
+              <div className="absolute z-20 w-full md:max-w-md mt-2 bg-white border border-gray-200 rounded-xl shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-3 border-b border-gray-100 flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input 
+                      type="text" 
+                      placeholder="Tìm tên giáo viên..." 
+                      className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  {role === 'admin' && (
+                    <div className="relative shrink-0" title="Lọc theo Tổ chuyên môn">
+                      <select
+                        className="h-full pl-3 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 font-medium focus:bg-white focus:border-indigo-500 outline-none appearance-none cursor-pointer"
+                        value={filterGroup}
+                        onChange={(e) => setFilterGroup(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value="">Tất cả Tổ</option>
+                        {dynamicDepartments.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                      <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="max-h-60 overflow-y-auto overscroll-contain">
+                  {filteredTeachers.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-gray-500 italic">Không tìm thấy giáo viên nào phù hợp.</div>
+                  ) : (
+                    <ul className="py-1">
+                      {filteredTeachers.map(t => (
+                        <li 
+                          key={t.id || t.name}
+                          className="px-4 py-2.5 hover:bg-indigo-50 cursor-pointer flex items-center justify-between group transition-colors"
+                          onClick={() => handleAddAbsentTeacher(t.name)}
+                        >
+                          <span className="font-bold text-gray-800 group-hover:text-indigo-700">{t.name}</span>
+                          <span className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-md group-hover:bg-white border border-transparent group-hover:border-indigo-100">{t.group}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           
           {selectedAbsentTeachers.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <div className="flex flex-wrap gap-2 mt-4 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100/50">
               {selectedAbsentTeachers.map(t => (
-                <span key={t} className="bg-indigo-100 text-indigo-800 px-3 py-2 md:py-1.5 rounded-full flex items-center text-sm font-medium border border-indigo-200 shadow-sm">
+                <span key={t} className="bg-white text-indigo-800 px-3 py-2 rounded-lg flex items-center text-sm font-bold border border-indigo-200 shadow-sm animate-in zoom-in-95 duration-200">
                   {t}
                   <button 
                     onClick={() => handleRemoveAbsentTeacher(t)} 
-                    className="ml-2 text-indigo-400 hover:text-indigo-900 focus:outline-none bg-white rounded-full p-1"
+                    className="ml-2 text-gray-400 hover:text-red-500 hover:bg-red-50 focus:outline-none rounded-full p-1 transition-colors"
                   >
-                    <X className="w-3 h-3 md:w-3 md:h-3" />
+                    <X className="w-4 h-4" />
                   </button>
                 </span>
               ))}
@@ -707,14 +778,14 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
             <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative bg-white">
               <div className={`w-full md:w-1/2 p-4 md:p-6 overflow-y-auto border-r-0 md:border-r border-gray-200 bg-white ${selectedSub ? 'hidden md:block' : 'block'}`}>
                 {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`] && (
-                  <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm gap-3">
+                  <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm gap-3 animate-in fade-in slide-in-from-top-2">
                     <div>
-                      <p className="font-medium text-green-800 flex items-center">
-                        <CheckCircle className="w-4 h-4 mr-2" />
-                        Đã phân công: {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`].substituteTeacher}
+                      <p className="font-bold text-green-800 flex items-center">
+                        <CheckCircle className="w-5 h-5 mr-2" />
+                        Đã chọn: {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`].substituteTeacher}
                       </p>
                       {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`].notes && (
-                        <p className="text-sm text-green-700 mt-1 ml-6">
+                        <p className="text-sm text-green-700 mt-1.5 ml-7 italic">
                           Ghi chú: {assignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`].notes}
                         </p>
                       )}
@@ -725,9 +796,9 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                         delete newAssignments[`${activeSlot.absentTeacher}-${activeSlot.day}-${activeSlot.session}-${activeSlot.period}`];
                         setAssignments(newAssignments);
                       }} 
-                      className="text-red-600 hover:text-red-800 text-sm font-medium bg-red-50 hover:bg-red-100 px-3 py-2 sm:py-1.5 rounded-lg transition-colors w-full sm:w-auto text-center"
+                      className="text-red-600 hover:text-white hover:bg-red-500 text-sm font-bold border border-red-200 bg-white px-4 py-2 rounded-lg transition-all w-full sm:w-auto text-center"
                     >
-                      Xóa phân công
+                      Hủy phân công
                     </button>
                   </div>
                 )}
@@ -746,36 +817,36 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                     {getSuggestions(activeSlot).map((s, index) => (
                       <div 
                         key={s.teacher.name} 
-                        className={`border rounded-xl overflow-hidden transition-all ${selectedSub === s.teacher.name ? 'border-indigo-500 ring-1 ring-indigo-500 shadow-md' : 'border-gray-200 hover:border-indigo-300 hover:shadow-sm active:bg-gray-50'}`}
+                        className={`border rounded-xl overflow-hidden transition-all ${selectedSub === s.teacher.name ? 'border-indigo-500 ring-2 ring-indigo-200 shadow-md transform scale-[1.01]' : 'border-gray-200 hover:border-indigo-300 hover:shadow-sm active:bg-gray-50'}`}
                         onMouseEnter={() => setHoveredSub(s.teacher.name)}
                         onMouseLeave={() => setHoveredSub(null)}
                       >
                         <div 
-                          className={`p-3 md:p-4 flex flex-col cursor-pointer ${selectedSub === s.teacher.name ? 'bg-indigo-50/30' : 'bg-white'}`}
+                          className={`p-3 md:p-4 flex flex-col cursor-pointer ${selectedSub === s.teacher.name ? 'bg-indigo-50/50' : 'bg-white'}`}
                           onClick={() => setSelectedSub(selectedSub === s.teacher.name ? null : s.teacher.name)}
                         >
                           <div className="flex justify-between items-start">
                             <div className="flex items-center">
-                              <div className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center text-sm font-bold mr-3 shrink-0 ${index === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                              <div className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center text-sm font-bold mr-3 shrink-0 ${index === 0 ? 'bg-green-100 text-green-700 ring-2 ring-green-200' : 'bg-gray-100 text-gray-600'}`}>
                                 {index + 1}
                               </div>
                               <div>
                                 <p className="font-bold text-gray-800 text-sm md:text-base">{s.teacher.name}</p>
-                                <p className="text-[11px] md:text-xs text-gray-500 line-clamp-1">{s.teacher.subject} - {s.teacher.group}</p>
+                                <p className="text-[11px] md:text-xs text-gray-500 line-clamp-1 mt-0.5">{s.teacher.subject} - {s.teacher.group}</p>
                               </div>
                             </div>
                             <div className="text-right shrink-0 ml-2">
                               <p className="text-[10px] md:text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 inline-block mb-1 shadow-sm">
                                 Điểm AI: {s.score}
                               </p>
-                              <p className="text-[10px] text-gray-400 mt-1 cursor-help" title={s.breakdown}>Xem chi tiết điểm</p>
+                              <p className="text-[10px] text-gray-400 mt-1 cursor-help hover:text-indigo-500 transition-colors" title={s.breakdown}>Xem chi tiết điểm</p>
                             </div>
                           </div>
                           
                           {/* 🔥 HIỂN THỊ CÁC NHÃN (TAGS) TỪ THUẬT TOÁN MỚI */}
                           <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100/50">
                             {s.tags.map((tag, idx) => (
-                              <span key={idx} className={`text-[10px] md:text-xs font-bold px-2 py-1 rounded border ${tag.color}`}>
+                              <span key={idx} className={`text-[10px] md:text-xs font-bold px-2 py-1 rounded border shadow-sm ${tag.color}`}>
                                 {tag.text}
                               </span>
                             ))}
@@ -792,31 +863,32 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                 {selectedSub && (
                   <button 
                     onClick={() => setSelectedSub(null)}
-                    className="md:hidden flex items-center justify-center w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-xl mb-4 font-medium shadow-sm active:bg-gray-100"
+                    className="md:hidden flex items-center justify-center w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-xl mb-4 font-bold shadow-sm active:bg-gray-100"
                   >
-                    ← Quay lại danh sách gợi ý
+                    ← Trở lại danh sách gợi ý
                   </button>
                 )}
 
                 {(hoveredSub || selectedSub) ? (
-                  <div className="flex-1 pb-10 md:pb-0">
+                  <div className="flex-1 pb-10 md:pb-0 animate-in fade-in zoom-in-95 duration-200">
                     {renderMiniSchedule(hoveredSub || selectedSub || '', activeSlot)}
                     
                     {selectedSub && (
                       <div className="mt-6 p-4 md:p-5 bg-white rounded-xl border border-indigo-200 shadow-md relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
-                        <h5 className="font-bold text-gray-800 mb-3 md:mb-4 text-sm md:text-base">
-                          Phân công cho: <span className="text-indigo-600 text-lg md:text-xl block md:inline mt-1 md:mt-0">{selectedSub}</span>
+                        <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500"></div>
+                        <h5 className="font-bold text-gray-800 mb-3 md:mb-4 text-sm md:text-base ml-2">
+                          Chốt phân công cho: <span className="text-indigo-600 text-lg md:text-xl block md:inline mt-1 md:mt-0">{selectedSub}</span>
                         </h5>
-                        <div className="space-y-4">
+                        <div className="space-y-4 ml-2">
                           <div>
-                            <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1.5">Ghi chú (Tùy chọn)</label>
+                            <label className="block text-xs md:text-sm font-bold text-gray-700 mb-1.5">Ghi chú gửi giáo viên (Tùy chọn)</label>
                             <input 
                               type="text" 
-                              placeholder="VD: Dạy bài số 3, ôn tập..." 
-                              className="w-full border border-gray-300 rounded-lg px-4 py-3 md:py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-gray-50 focus:bg-white" 
+                              placeholder="VD: Dạy tiếp bài số 3, cho kiểm tra 15p..." 
+                              className="w-full border border-gray-300 rounded-lg px-4 py-3 md:py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-gray-50 focus:bg-white outline-none transition-all" 
                               value={subNotes} 
                               onChange={e => setSubNotes(e.target.value)} 
+                              onKeyDown={e => { if(e.key === 'Enter') handleAssign(selectedSub) }}
                             />
                           </div>
                           <button 
@@ -833,8 +905,8 @@ export const SubstituteTeacher: React.FC<{ role?: 'admin' | 'teacher' | 'ttcm' |
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
                     <Calendar className="w-16 h-16 mb-4 text-gray-300" />
-                    <p className="text-lg font-medium text-gray-500">Chưa chọn người thay thế</p>
-                    <p className="text-sm mt-2 text-center max-w-xs">Di chuột hoặc chọn giáo viên ở danh sách bên trái để xem trước TKB.</p>
+                    <p className="text-lg font-bold text-gray-500">Chưa chọn người thay thế</p>
+                    <p className="text-sm mt-2 text-center max-w-xs font-medium">Di chuột hoặc chạm vào giáo viên ở danh sách bên trái để xem Thời khóa biểu của họ.</p>
                   </div>
                 )}
               </div>

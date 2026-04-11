@@ -14,6 +14,7 @@ export interface PCGDTeacher {
     uniqueName: string;
     fullName: string;
     firstName: string;
+    lastName: string;
     pccmStr: string;
     classes: Set<string>;
     parsedSubjects: Set<string>;
@@ -23,7 +24,7 @@ export interface ParseResult {
     rawSchedules: Schedule[];
     tkbTeachers: TKBTeacher[];
     pcgdTeachers: PCGDTeacher[];
-    suggestedMapping: Record<string, string>; // Gợi ý của máy: { "BinhV2": "Phùng Thị Bình" }
+    suggestedMapping: Record<string, string>; // Vẫn giữ interface để không lỗi UI
 }
 
 // ============================================================================
@@ -44,18 +45,6 @@ const getDepartmentFromSheetName = (sheetName: string): string => {
     return 'Chung';
 };
 
-const inferDepartmentFromSubject = (subject: string): string | null => {
-    if (!subject) return null;
-    const s = subject.toUpperCase();
-    if (s.includes('ANH') || s.includes('AVĂN')) return 'Ngoại ngữ';
-    if (s.includes('VĂN') || s.includes('GDCD')) return 'Văn - GDCD';
-    if (s.includes('KHTN') || s.includes('HÓA') || s.includes('LÝ') || s.includes('SINH') || s.includes('CÔNG NGHỆ') || s.includes('CNGHỆ')) return 'KHTN và Công nghệ';
-    if (s.includes('SỬ') || s.includes('ĐỊA') || s.includes('LỊCH SỬ') || s.includes('ĐỊA LÝ')) return 'Sử - Địa';
-    if (s.includes('GDTC') || s.includes('THỂ DỤC') || s.includes('NGHỆ THUẬT') || s.includes('ÂM NHẠC') || s.includes('MỸ THUẬT')) return 'Nghệ thuật - Thể chất';
-    if (s.includes('TOÁN') || s.includes('TIN')) return 'Toán - Tin';
-    return null;
-};
-
 const formatClassName = (className: any): string => {
     if (!className) return '';
     return String(className).trim().replace(/\./g, '/').replace(/\s+/g, '');
@@ -65,6 +54,66 @@ const cleanString = (str: any): string => {
     if (str === null || str === undefined) return '';
     return String(str).normalize('NFC').trim();
 };
+
+// 🔥 HÀM MỚI: PHÂN TÍCH TÊN NGAY LÚC ĐỌC Ô EXCEL DỰA VÀO NGỮ CẢNH (MÔN + LỚP)
+const resolveExactTeacher = (rawName: string, subject: string, className: string, pcgdList: PCGDTeacher[]): string => {
+    if (!rawName || rawName === 'Chưa rõ') return 'Chưa rõ';
+    
+    const shortUpper = rawName.toUpperCase().replace(/\s+/g, '');
+    const shortNoAccent = removeAccents(shortUpper);
+    const shortParts = rawName.toUpperCase().trim().split(/\s+/);
+    const shortFirstName = shortParts.pop() || '';
+    
+    let bestMatch = rawName; // Mặc định giữ tên gốc nếu bó tay
+    let maxScore = 0;
+
+    pcgdList.forEach(cand => {
+        let score = 0;
+        const candUpper = cand.fullName.toUpperCase().replace(/\s+/g, '');
+        const candNoAccent = removeAccents(candUpper);
+        const firstName = cand.firstName;
+        
+        // 1. Khớp chính xác 100% (Ví dụ TKB ghi đủ: Mai Thị Hiền)
+        if (candUpper === shortUpper) {
+            score += 10000;
+        } 
+        else if (candNoAccent === shortNoAccent) {
+            score += 8000;
+        }
+        // 2. TKB ghi Tên viết tắt (Ví dụ: "Hiền", "M.Hiền", "Ngọc Hiền")
+        else if (shortUpper.includes(firstName) || firstName === shortUpper || shortFirstName === firstName) {
+            score += 500; // Cùng tên (Xác định có khả năng là cô này)
+            
+            // 🔥 BẰNG CHỨNG THÉP: Kiểm tra PCGD
+            // Nếu cô này CÓ phân công dạy LỚP NÀY và MÔN NÀY -> Chốt luôn!
+            const isTeachingThisClass = cand.classes.has(className);
+            let isTeachingThisSubject = false;
+            
+            // Xử lý linh hoạt tên môn (Ví dụ: KHTN1 khớp với KHTN)
+            cand.parsedSubjects.forEach(ps => {
+                if (ps.includes(subject.toUpperCase()) || subject.toUpperCase().includes(ps)) {
+                    isTeachingThisSubject = true;
+                }
+            });
+
+            if (isTeachingThisClass && isTeachingThisSubject) {
+                score += 5000; // Khớp Cả Lớp + Môn -> Hoàn hảo
+            } else if (isTeachingThisSubject) {
+                score += 2000; // Khớp Môn (Dù PCGD không ghi lớp, nhưng đúng chuyên môn)
+            } else if (candUpper.includes(shortUpper)) {
+                score += 1000; // Có chữ lót trùng khớp (VD: Ngọc Hiền trùng với Ngọc Hiền)
+            }
+        }
+
+        if (score > maxScore && score >= 500) {
+            maxScore = score;
+            bestMatch = cand.uniqueName; // Trả về tên Đầy đủ
+        }
+    });
+
+    return bestMatch;
+};
+
 
 // ============================================================================
 // HÀM XỬ LÝ CHÍNH
@@ -149,10 +198,15 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                                 });
                             });
 
+                            const nameParts = fullName.split(' ');
+                            const firstName = nameParts.pop()?.toUpperCase() || '';
+                            const lastName = nameParts[0]?.toUpperCase() || '';
+
                             pcgdTeachers.push({
                                 uniqueName: fullName,
                                 fullName,
-                                firstName: fullName.split(' ').pop()?.toUpperCase() || '',
+                                firstName,
+                                lastName, 
                                 pccmStr: pccmStr.toUpperCase(),
                                 classes: pcgdClasses,
                                 parsedSubjects
@@ -173,7 +227,7 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                     }
                 });
 
-                // 3. ĐỌC TKB_LOP ĐỂ TẠO LỊCH THÔ (Dữ liệu Cột 1)
+                // 3. ĐỌC TKB_LOP ĐỂ TẠO LỊCH THÔ VÀ DỊCH TÊN NGAY LẬP TỨC
                 workbook.SheetNames.forEach(sheetName => {
                     if (!sheetName.toUpperCase().includes('TKB_LOP')) return;
 
@@ -258,13 +312,16 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
 
                                             if (!giao_vien_raw) giao_vien_raw = 'Chưa rõ';
 
-                                            // Đẩy TÊN GỐC vào rawSchedules
+                                            // 🔥 GỌI HÀM DỊCH TÊN CHÍNH XÁC 100% NGAY TẠI ĐÂY
+                                            const lopStr = colMap[c].className;
+                                            const finalTeacherName = resolveExactTeacher(giao_vien_raw, mon, lopStr, pcgdTeachers);
+
                                             const scheduleObj: Schedule = {
                                                 thu: currentThu,
                                                 tiet: currentTiet > 5 ? currentTiet - 5 : currentTiet,
-                                                lop: colMap[c].className,
+                                                lop: lopStr,
                                                 mon: mon,
-                                                giao_vien: giao_vien_raw, 
+                                                giao_vien: finalTeacherName, // Lưu trực tiếp tên thật
                                                 phong: '',
                                                 buoi: currentTiet > 5 ? 'Chiều' : colMap[c].buoi
                                             };
@@ -280,16 +337,16 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                                                 rawSchedulesMap.set(key, scheduleObj);
                                             }
 
-                                            // Thu thập danh sách TÊN VIẾT TẮT
-                                            if (giao_vien_raw !== 'Chưa rõ') {
-                                                if (!tkbTeachersMap.has(giao_vien_raw)) {
-                                                    tkbTeachersMap.set(giao_vien_raw, {
-                                                        originalName: giao_vien_raw,
+                                            // Đưa vào danh sách TKB Teachers (dùng để hiển thị thống kê UI)
+                                            if (finalTeacherName !== 'Chưa rõ') {
+                                                if (!tkbTeachersMap.has(finalTeacherName)) {
+                                                    tkbTeachersMap.set(finalTeacherName, {
+                                                        originalName: finalTeacherName,
                                                         inferredGroup: teacherDepartmentDict.get(giao_vien_raw) || 'Chung',
                                                         subjectCounts: new Map<string, number>()
                                                     });
                                                 }
-                                                const tData = tkbTeachersMap.get(giao_vien_raw)!;
+                                                const tData = tkbTeachersMap.get(finalTeacherName)!;
                                                 tData.subjectCounts.set(mon, (tData.subjectCounts.get(mon) || 0) + 1);
                                             }
                                         }
@@ -300,52 +357,9 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                     }
                 });
 
-                // 4. MÁY TÍNH "CHẤM ĐIỂM" VÀ ĐƯA RA GỢI Ý MAPPING
+                // Do đã dịch tên trực tiếp ở trên nên bảng mapping này để rỗng để tránh UI báo sai
                 const suggestedMapping: Record<string, string> = {};
                 
-                tkbTeachersMap.forEach((tkbData, shortName) => {
-                    let bestMatch: PCGDTeacher | null = null;
-                    let maxScore = 0;
-
-                    const shortUpper = shortName.toUpperCase().replace(/\s+/g, '');
-                    const shortNoAccent = removeAccents(shortUpper);
-
-                    pcgdTeachers.forEach(cand => {
-                        let score = 0;
-                        const candUpper = cand.fullName.toUpperCase().replace(/\s+/g, '');
-                        const candNoAccent = removeAccents(candUpper);
-                        const firstName = cand.firstName.toUpperCase();
-                        const firstNoAccent = removeAccents(firstName);
-
-                        // Điểm Tên (Góp phần phá giải ca BinhV2)
-                        if (candUpper === shortUpper) score += 10000;
-                        else if (candNoAccent === shortNoAccent) score += 8000;
-                        else if (candUpper.includes(shortUpper)) score += 1000;
-                        else if (candNoAccent.includes(shortNoAccent)) score += 500;
-                        else if (shortUpper.includes(firstName)) score += 200;
-                        else if (shortNoAccent.includes(firstNoAccent)) score += 100;
-
-                        // Điểm Môn (Chỉ tính nếu tên có sự liên quan)
-                        if (score > 0) {
-                            tkbData.subjectCounts.forEach((_, mon) => {
-                                if (mon && cand.pccmStr.includes(mon.toUpperCase())) score += 50;
-                            });
-                        }
-
-                        // Ngưỡng an toàn (Điểm > 150 máy mới dám tự nhận vơ)
-                        if (score > maxScore && score > 150) {
-                            maxScore = score;
-                            bestMatch = cand;
-                        }
-                    });
-
-                    // Lưu vào từ điển gợi ý
-                    if (bestMatch) {
-                        suggestedMapping[shortName] = bestMatch.uniqueName;
-                    }
-                });
-
-                // Chuyển Map thành Mảng để gửi đi
                 const rawSchedules = Array.from(rawSchedulesMap.values());
                 const tkbTeachers = Array.from(tkbTeachersMap.values());
 

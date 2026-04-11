@@ -168,13 +168,12 @@ export const DisabilityReport: React.FC = () => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT');
   };
 
-  // 🔥 HÀM CHUẨN HÓA TÊN MÔN HỌC (GỘP LÝ, HÓA, SINH, KHTN...)
+  // 🔥 HÀM CHUẨN HÓA TÊN MÔN HỌC (GỘP LÝ, HÓA, SINH, KHTN VÀO CHUNG)
   const formatSubjectName = (rawName: string): string => {
     if (!rawName) return '';
     const upperName = rawName.toUpperCase().trim();
     if (isHDTNType(upperName)) return 'HĐTN';
     
-    // Gộp tất cả các biến thể của KHTN thành một mối
     const khtnVariants = ['LÝ', 'HÓA', 'SINH', 'KHTN', 'KHTN 1', 'KHTN 2', 'KHTN 3', 'KHTN1', 'KHTN2', 'KHTN3'];
     if (khtnVariants.includes(upperName)) {
       return 'KHTN';
@@ -221,7 +220,7 @@ export const DisabilityReport: React.FC = () => {
       const tsMap = new Map<string, { teacher: string, subject: string }>();
       classSchedules.forEach(s => {
         if (s.giao_vien === 'Chưa rõ') return;
-        const subject = formatSubjectName(s.mon); // Gọi hàm chuẩn hóa tên môn
+        const subject = formatSubjectName(s.mon); 
         const key = `${s.giao_vien}|${subject}`;
         if (!tsMap.has(key)) tsMap.set(key, { teacher: s.giao_vien, subject });
       });
@@ -246,7 +245,6 @@ export const DisabilityReport: React.FC = () => {
               count = 3;
             }
           } else {
-            // Đếm tất cả các tiết mà sau khi chuẩn hóa có tên bằng với combo.subject
             count = vSchedules.filter(s => !isHDTNType(s.mon) && formatSubjectName(s.mon) === combo.subject).length;
           }
 
@@ -281,7 +279,7 @@ export const DisabilityReport: React.FC = () => {
 
 
   // =====================================================================
-  // 👉 XUẤT EXCEL 1: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN & TỔNG HỢP TỔ)
+  // 👉 XUẤT EXCEL 1: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN TỐI ƯU HÓA KHỔ A4 DỌC)
   // =====================================================================
   const handleExportExcelMau1 = async () => {
     if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
@@ -356,12 +354,28 @@ export const DisabilityReport: React.FC = () => {
 
       const createIndividualSheet = (teacherName: string, tData: any) => {
         const ws = wb.addWorksheet(teacherName.substring(0, 31).replace(/[\\/?*\[\]]/g, ''));
-        ws.pageSetup = { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+        
+        // 🔥 CẤU HÌNH IN KHỔ A4 DỌC
+        ws.pageSetup = { 
+            paperSize: 9, 
+            orientation: 'portrait', 
+            fitToPage: true, 
+            fitToWidth: 1, 
+            fitToHeight: 0, 
+            margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } 
+        };
+        
         const getColLetter = (colIndex: number) => { let temp = colIndex; let letter = ''; while (temp > 0) { let modulo = (temp - 1) % 26; letter = String.fromCharCode(65 + modulo) + letter; temp = Math.floor((temp - modulo) / 26); } return letter; };
         const END_COL = getColLetter(TOTAL_COLS); const MONTH_END_COL = getColLetter(4 + M); const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
-        ws.getColumn(1).width = 6; ws.getColumn(2).width = 12; ws.getColumn(3).width = 25; ws.getColumn(4).width = 16; 
-        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 16; 
-        ws.getColumn(TOTAL_COLS - 1).width = 13; ws.getColumn(TOTAL_COLS).width = 15;     
+        
+        // 🔥 CÂN CHỈNH LẠI ĐỘ RỘNG CỘT CHO VỪA A4 DỌC
+        ws.getColumn(1).width = 4.5;  // STT
+        ws.getColumn(2).width = 9;    // Lớp
+        ws.getColumn(3).width = 17;   // Tên HS
+        ws.getColumn(4).width = 11.5; // Môn
+        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 9.5; // Các cột Tháng
+        ws.getColumn(TOTAL_COLS - 1).width = 10; // Cột Tổng
+        ws.getColumn(TOTAL_COLS).width = 9.5;    // Cột Ghi chú
 
         let r = 1;
         ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
@@ -383,12 +397,16 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${displaySubjects.join(', ')}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
 
+        ws.getRow(r).height = 35; // Tăng chiều cao Header
         ws.mergeCells(`A${r}:A${r+1}`); ws.getCell(`A${r}`).value = 'STT';
         ws.mergeCells(`B${r}:B${r+1}`); ws.getCell(`B${r}`).value = 'Lớp có\nHSKT';
         ws.mergeCells(`C${r}:C${r+1}`); ws.getCell(`C${r}`).value = 'Họ và tên học sinh khuyết tật';
         ws.mergeCells(`D${r}:D${r+1}`); ws.getCell(`D${r}`).value = 'Môn dạy';
         ws.mergeCells(`E${r}:${MONTH_END_COL}${r}`); ws.getCell(`E${r}`).value = 'Tổng số giờ dạy/tiết dạy trong kỳ\n(Ghi rõ môn dạy; số tiết thực dạy x số tuần)';
+        
+        ws.getRow(r+1).height = 25;
         months.forEach((m, idx) => { ws.getCell(`${getColLetter(5 + idx)}${r+1}`).value = `Tháng\n${m}`; });
+        
         ws.mergeCells(`${SUM_COL_LETTER}${r}:${SUM_COL_LETTER}${r+1}`); ws.getCell(`${SUM_COL_LETTER}${r}`).value = `Tổng cộng số\ntiết dạy/tuần\ntrong kỳ ${config.semester} để\ntính hưởng PC`;
         ws.mergeCells(`${END_COL}${r}:${END_COL}${r+1}`); ws.getCell(`${END_COL}${r}`).value = 'Ghi chú';
 
@@ -400,7 +418,8 @@ export const DisabilityReport: React.FC = () => {
 
         const colTotals: Record<number, number> = {};
         tData.records.forEach((rec: any, idx: number) => {
-          const row = ws.getRow(r); row.height = 40; 
+          const row = ws.getRow(r); 
+          row.height = 55; // Tăng chiều cao dòng cho nội dung rớt thoải mái
           row.getCell(1).value = idx + 1; row.getCell(2).value = rec.className; row.getCell(3).value = rec.studentName;
           row.getCell(4).value = rec.subject === 'HĐTN' ? 'HĐTN (GVCN)' : rec.subject;
           if (rec.subject === 'HĐTN') row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
@@ -411,7 +430,7 @@ export const DisabilityReport: React.FC = () => {
               const lines: string[] = []; let monthTotal = 0;
               Object.entries(details).forEach(([countStr, weeks]) => {
                 const c = parseInt(countStr); const w = weeks as number;
-                lines.push(`${c}t x ${w} tuần = ${c * w}`); monthTotal += (c * w);
+                lines.push(`${c}t x ${w} tuần\n= ${c * w}`); monthTotal += (c * w);
               });
               row.getCell(5 + mIdx).value = lines.join('\n'); colTotals[m] = (colTotals[m] || 0) + monthTotal;
             } else row.getCell(5 + mIdx).value = '';
@@ -432,17 +451,30 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 }; r++;
         ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`); ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' }; r++;
         
-        const sigSpan = Math.max(2, Math.floor(TOTAL_COLS / 4));
-        ws.mergeCells(r, 1, r, sigSpan); ws.getCell(r, 1).value = 'Tổ trưởng chuyên môn'; ws.getCell(r, 1).alignment = { horizontal: 'center' };
-        ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2); ws.getCell(r, sigSpan + 1).value = 'Phó Hiệu trưởng'; ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
-        ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3); ws.getCell(r, sigSpan * 2 + 1).value = 'Hiệu trưởng'; ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
-        ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS); ws.getCell(r, sigSpan * 3 + 1).value = 'Người kê khai'; ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
-        for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; } r += 4;
+        // 🔥 THUẬT TOÁN CHIA ĐỀU 4 CỘT CHỮ KÝ ĐỂ KHÔNG BỊ KHUẤT
+        const span1 = Math.floor(TOTAL_COLS / 4);
+        const span2 = Math.floor((TOTAL_COLS - span1) / 3);
+        const span3 = Math.floor((TOTAL_COLS - span1 - span2) / 2);
         
-        ws.mergeCells(r, 1, r, sigSpan); ws.getCell(r, 1).value = config.ttcm; ws.getCell(r, 1).alignment = { horizontal: 'center' };
-        ws.mergeCells(r, sigSpan + 1, r, sigSpan * 2); ws.getCell(r, sigSpan + 1).value = config.vicePrincipal; ws.getCell(r, sigSpan + 1).alignment = { horizontal: 'center' };
-        ws.mergeCells(r, sigSpan * 2 + 1, r, sigSpan * 3); ws.getCell(r, sigSpan * 2 + 1).value = config.principal; ws.getCell(r, sigSpan * 2 + 1).alignment = { horizontal: 'center' };
-        ws.mergeCells(r, sigSpan * 3 + 1, r, TOTAL_COLS); ws.getCell(r, sigSpan * 3 + 1).value = teacherName; ws.getCell(r, sigSpan * 3 + 1).alignment = { horizontal: 'center' };
+        let c1 = 1;
+        let c2 = c1 + span1;
+        let c3 = c2 + span2;
+        let c4 = c3 + span3;
+
+        ws.getRow(r).height = 35; // Cao lên cho chữ wrap thoải mái
+        ws.mergeCells(r, c1, r, c2 - 1); ws.getCell(r, c1).value = 'Tổ trưởng chuyên môn'; ws.getCell(r, c1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.mergeCells(r, c2, r, c3 - 1); ws.getCell(r, c2).value = 'Phó Hiệu trưởng'; ws.getCell(r, c2).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.mergeCells(r, c3, r, c4 - 1); ws.getCell(r, c3).value = 'Hiệu trưởng'; ws.getCell(r, c3).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.mergeCells(r, c4, r, TOTAL_COLS); ws.getCell(r, c4).value = 'Người kê khai'; ws.getCell(r, c4).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; } 
+        
+        r += 5; // Khoảng cách chữ ký
+        
+        ws.getRow(r).height = 35; // Đảm bảo tên không bị che khuất phần dưới
+        ws.mergeCells(r, c1, r, c2 - 1); ws.getCell(r, c1).value = config.ttcm; ws.getCell(r, c1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.mergeCells(r, c2, r, c3 - 1); ws.getCell(r, c2).value = config.vicePrincipal; ws.getCell(r, c2).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.mergeCells(r, c3, r, c4 - 1); ws.getCell(r, c3).value = config.principal; ws.getCell(r, c3).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.mergeCells(r, c4, r, TOTAL_COLS); ws.getCell(r, c4).value = teacherName; ws.getCell(r, c4).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; }
       };
 
@@ -587,7 +619,7 @@ export const DisabilityReport: React.FC = () => {
   };
 
   // =====================================================================
-  // 👉 XUẤT EXCEL 3: BÁO CÁO THEO MÔN HỌC
+  // 👉 XUẤT EXCEL 3: BÁO CÁO THEO MÔN HỌC (CHI TIẾT THEO LỚP)
   // =====================================================================
   const handleExportExcelTheoMon = async () => {
     if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
@@ -598,21 +630,29 @@ export const DisabilityReport: React.FC = () => {
       const ws = wb.addWorksheet('Theo_Mon');
 
       ws.pageSetup = { paperSize: 9, orientation: 'portrait', margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
-      ws.columns = [ { width: 6 }, { width: 25 }, { width: 35 }, { width: 15 }, { width: 20 } ];
+      
+      ws.columns = [ 
+        { width: 6 },  
+        { width: 25 }, 
+        { width: 15 }, 
+        { width: 35 }, 
+        { width: 15 }, 
+        { width: 20 }  
+      ];
 
       let r = 1;
-      ws.getCell(`E${r}`).value = 'Thống kê theo Môn'; ws.getCell(`E${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`E${r}`).alignment = { horizontal: 'right' }; r++;
-      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
-      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'TRƯỜNG THCS NGUYỄN BỈNH KHIÊM'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
+      ws.getCell(`F${r}`).value = 'Thống kê theo Môn'; ws.getCell(`F${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`F${r}`).alignment = { horizontal: 'right' }; r++;
+      ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'TRƯỜNG THCS NGUYỄN BỈNH KHIÊM'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
       
       const filterText = selectedExportDept ? `(TỔ ${selectedExportDept.toUpperCase()})` : '(TOÀN TRƯỜNG)';
-      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `BẢNG THỐNG KÊ SỐ TIẾT DẠY KHUYẾT TẬT THEO MÔN HỌC ${filterText}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
-      ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
+      ws.mergeCells(`A${r}:F${r}`); ws.getCell(`A${r}`).value = `BẢNG THỐNG KÊ SỐ TIẾT DẠY KHUYẾT TẬT THEO MÔN HỌC ${filterText}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 14 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
+      ws.mergeCells(`A${r}:F${r}`); ws.getCell(`A${r}`).value = `HỌC KỲ ${config.semester.toUpperCase()} NĂM HỌC ${config.schoolYear}`; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 13 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r += 2;
 
       const header = ws.getRow(r);
-      header.values = ['TT', 'Môn học', 'Giáo viên giảng dạy', 'Tổng số tiết', 'Ghi chú'];
+      header.values = ['TT', 'Môn học', 'Lớp', 'Giáo viên giảng dạy', 'Tổng số tiết', 'Ghi chú'];
       header.height = 30;
-      for(let i=1; i<=5; i++) {
+      for(let i=1; i<=6; i++) {
         const c = header.getCell(i); c.font = { bold: true, name: 'Times New Roman', size: 12 };
         c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
@@ -620,7 +660,7 @@ export const DisabilityReport: React.FC = () => {
       r++;
 
       const masterRecords = buildMasterRecords();
-      const subjectMap = new Map<string, Map<string, number>>();
+      const subjectMap = new Map<string, Map<string, { className: string, teacher: string, totalP: number }>>();
       let grandTotal = 0;
 
       masterRecords.forEach(rec => {
@@ -629,11 +669,16 @@ export const DisabilityReport: React.FC = () => {
         
         if (selectedExportDept && tGroup !== selectedExportDept) return;
 
-        const subj = rec.subject;
+        const subj = rec.subject === 'HĐTN' ? 'HĐTN (GVCN)' : rec.subject;
         if (!subjectMap.has(subj)) subjectMap.set(subj, new Map());
         
         const tMap = subjectMap.get(subj)!;
-        tMap.set(rec.teacher, (tMap.get(rec.teacher) || 0) + rec.totalP);
+        const key = `${rec.student.className}_${rec.teacher}`;
+        
+        if (!tMap.has(key)) {
+            tMap.set(key, { className: rec.student.className, teacher: rec.teacher, totalP: 0 });
+        }
+        tMap.get(key)!.totalP += rec.totalP;
         grandTotal += rec.totalP;
       });
 
@@ -645,64 +690,66 @@ export const DisabilityReport: React.FC = () => {
       let globalStt = 1;
 
       sortedSubjects.forEach(subj => {
-          const tMap = subjectMap.get(subj)!;
-          const sortedTeachers = Array.from(tMap.entries()).sort((a, b) => {
-              const nameA = a[0].split(' ').pop() || '';
-              const nameB = b[0].split(' ').pop() || '';
-              return nameA.localeCompare(nameB, 'vi');
+          const records = Array.from(subjectMap.get(subj)!.values());
+          
+          records.sort((a, b) => {
+             const classCmp = a.className.localeCompare(b.className, 'vi', { numeric: true });
+             if (classCmp !== 0) return classCmp;
+             return a.teacher.localeCompare(b.teacher, 'vi');
           });
 
           let subjTotal = 0;
           const startR = r;
 
-          sortedTeachers.forEach(([tName, tTotal]) => {
+          records.forEach(record => {
               const row = ws.getRow(r);
               row.height = 25;
               row.getCell(1).value = globalStt++;
-              row.getCell(2).value = subj === 'HĐTN' ? 'HĐTN (GVCN)' : subj;
-              row.getCell(3).value = tName;
-              row.getCell(4).value = tTotal;
-              row.getCell(5).value = '';
+              row.getCell(2).value = subj;
+              row.getCell(3).value = record.className.replace(/\./g, '/');
+              row.getCell(4).value = record.teacher;
+              row.getCell(5).value = record.totalP;
+              row.getCell(6).value = '';
               
-              for(let i=1; i<=5; i++) {
+              for(let i=1; i<=6; i++) {
                 const c = row.getCell(i);
                 c.font = { name: 'Times New Roman', size: 12 };
-                c.alignment = { horizontal: i===2||i===3 ? 'left' : 'center', vertical: 'middle' };
+                c.alignment = { horizontal: (i===2||i===4) ? 'left' : 'center', vertical: 'middle' };
                 c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
               }
-              subjTotal += tTotal;
+              subjTotal += record.totalP;
               r++;
           });
 
-          if (sortedTeachers.length > 1) {
+          if (records.length > 1) {
               ws.mergeCells(startR, 2, r - 1, 2);
               ws.getCell(startR, 2).alignment = { vertical: 'middle', horizontal: 'center' };
           }
 
           const subRow = ws.getRow(r);
           subRow.height = 25;
-          ws.mergeCells(`A${r}:C${r}`);
-          subRow.getCell(1).value = `Tổng cộng môn ${subj === 'HĐTN' ? 'HĐTN (GVCN)' : subj}`;
-          subRow.getCell(4).value = subjTotal;
-          for(let i=1; i<=5; i++) {
+          ws.mergeCells(`A${r}:D${r}`);
+          subRow.getCell(1).value = `Tổng cộng môn ${subj}`;
+          subRow.getCell(5).value = subjTotal;
+          for(let i=1; i<=6; i++) {
              const c = subRow.getCell(i);
              c.font = { bold: true, name: 'Times New Roman', size: 12, italic: true };
              c.alignment = { horizontal: i===1 ? 'right' : 'center', vertical: 'middle' };
-             if (i===1 || i===4 || i===5) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+             if (i===1 || i===5 || i===6) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
           }
           r++;
       });
 
-      const footR = ws.getRow(r); footR.height = 30; ws.mergeCells(`A${r}:C${r}`);
-      footR.getCell(1).value = 'TỔNG CỘNG CHUNG'; footR.getCell(4).value = grandTotal;
-      for(let i=1; i<=5; i++) {
+      const footR = ws.getRow(r); footR.height = 30; ws.mergeCells(`A${r}:D${r}`);
+      footR.getCell(1).value = 'TỔNG CỘNG CHUNG'; footR.getCell(5).value = grandTotal;
+      for(let i=1; i<=6; i++) {
         const c = footR.getCell(i); c.font = { bold: true, name: 'Times New Roman', size: 13, color: { argb: 'FF0000' } }; c.alignment = { horizontal: 'center', vertical: 'middle' };
-        if(i===1 || i===4 || i===5) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+        if(i===1 || i===5 || i===6) c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
       }
       r += 2;
 
-      ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'Người lập bảng'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
-      ws.mergeCells(`D${r}:E${r}`); ws.getCell(`D${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}\nHiệu trưởng`; ws.getCell(`D${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`D${r}`).alignment = { horizontal: 'center', wrapText: true };
+      ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'Người lập bảng'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
+      ws.mergeCells(`E${r}:F${r}`); ws.getCell(`E${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}\nHiệu trưởng`; ws.getCell(`E${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`E${r}`).alignment = { horizontal: 'center', wrapText: true };
 
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -712,7 +759,6 @@ export const DisabilityReport: React.FC = () => {
       console.error(error); alert("Lỗi xuất báo cáo theo môn!"); 
     } finally { setIsExporting(false); }
   };
-
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-10 relative">

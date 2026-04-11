@@ -279,7 +279,7 @@ export const DisabilityReport: React.FC = () => {
 
 
   // =====================================================================
-  // 👉 XUẤT EXCEL 1: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN TỐI ƯU HÓA KHỔ A4 DỌC)
+  // 👉 XUẤT EXCEL 1: MẪU 1 (BẢNG KÊ KHAI CÁ NHÂN)
   // =====================================================================
   const handleExportExcelMau1 = async () => {
     if (students.length === 0) return alert("Vui lòng thêm ít nhất 1 học sinh khuyết tật!");
@@ -355,7 +355,6 @@ export const DisabilityReport: React.FC = () => {
       const createIndividualSheet = (teacherName: string, tData: any) => {
         const ws = wb.addWorksheet(teacherName.substring(0, 31).replace(/[\\/?*\[\]]/g, ''));
         
-        // 🔥 CẤU HÌNH IN KHỔ A4 DỌC
         ws.pageSetup = { 
             paperSize: 9, 
             orientation: 'portrait', 
@@ -368,14 +367,13 @@ export const DisabilityReport: React.FC = () => {
         const getColLetter = (colIndex: number) => { let temp = colIndex; let letter = ''; while (temp > 0) { let modulo = (temp - 1) % 26; letter = String.fromCharCode(65 + modulo) + letter; temp = Math.floor((temp - modulo) / 26); } return letter; };
         const END_COL = getColLetter(TOTAL_COLS); const MONTH_END_COL = getColLetter(4 + M); const SUM_COL_LETTER = getColLetter(TOTAL_COLS - 1);
         
-        // 🔥 CÂN CHỈNH LẠI ĐỘ RỘNG CỘT CHO VỪA A4 DỌC
-        ws.getColumn(1).width = 4.5;  // STT
-        ws.getColumn(2).width = 9;    // Lớp
-        ws.getColumn(3).width = 17;   // Tên HS
-        ws.getColumn(4).width = 11.5; // Môn
-        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 9.5; // Các cột Tháng
-        ws.getColumn(TOTAL_COLS - 1).width = 10; // Cột Tổng
-        ws.getColumn(TOTAL_COLS).width = 9.5;    // Cột Ghi chú
+        ws.getColumn(1).width = 4.5; 
+        ws.getColumn(2).width = 9;   
+        ws.getColumn(3).width = 17;  
+        ws.getColumn(4).width = 11.5; 
+        for(let i = 1; i <= M; i++) ws.getColumn(4 + i).width = 9.5; 
+        ws.getColumn(TOTAL_COLS - 1).width = 10; 
+        ws.getColumn(TOTAL_COLS).width = 9.5;    
 
         let r = 1;
         ws.mergeCells(`A${r}:C${r}`); ws.getCell(`A${r}`).value = 'UBND PHƯỜNG HÒA KHÁNH'; ws.getCell(`A${r}`).alignment = { horizontal: 'center' };
@@ -397,7 +395,7 @@ export const DisabilityReport: React.FC = () => {
         ws.mergeCells(`A${r}:${END_COL}${r}`); ws.getCell(`A${r}`).value = `Bộ môn giảng dạy: ${displaySubjects.join(', ')}`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 };
         r++;
 
-        ws.getRow(r).height = 35; // Tăng chiều cao Header
+        ws.getRow(r).height = 35; 
         ws.mergeCells(`A${r}:A${r+1}`); ws.getCell(`A${r}`).value = 'STT';
         ws.mergeCells(`B${r}:B${r+1}`); ws.getCell(`B${r}`).value = 'Lớp có\nHSKT';
         ws.mergeCells(`C${r}:C${r+1}`); ws.getCell(`C${r}`).value = 'Họ và tên học sinh khuyết tật';
@@ -419,7 +417,7 @@ export const DisabilityReport: React.FC = () => {
         const colTotals: Record<number, number> = {};
         tData.records.forEach((rec: any, idx: number) => {
           const row = ws.getRow(r); 
-          row.height = 55; // Tăng chiều cao dòng cho nội dung rớt thoải mái
+          row.height = 55; 
           row.getCell(1).value = idx + 1; row.getCell(2).value = rec.className; row.getCell(3).value = rec.studentName;
           row.getCell(4).value = rec.subject === 'HĐTN' ? 'HĐTN (GVCN)' : rec.subject;
           if (rec.subject === 'HĐTN') row.getCell(4).font = { bold: true, italic: true, name: 'Times New Roman', size: 11, color: { argb: '0052cc' } };
@@ -448,33 +446,44 @@ export const DisabilityReport: React.FC = () => {
         r += 2;
 
         ws.mergeCells(`A${r}:D${r}`); ws.getCell(`A${r}`).value = 'XÁC NHẬN CỦA TỔ CHUYÊN MÔN'; ws.getCell(`A${r}`).font = { bold: true, name: 'Times New Roman', size: 12 }; ws.getCell(`A${r}`).alignment = { horizontal: 'center' }; r++;
-        ws.mergeCells(`A${r}:E${r}`); ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`; ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 }; r++;
-        ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`); ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 }; ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' }; r++;
         
-        // 🔥 THUẬT TOÁN CHIA ĐỀU 4 CỘT CHỮ KÝ ĐỂ KHÔNG BỊ KHUẤT
-        const span1 = Math.floor(TOTAL_COLS / 4);
-        const span2 = Math.floor((TOTAL_COLS - span1) / 3);
-        const span3 = Math.floor((TOTAL_COLS - span1 - span2) / 2);
+        // 🔥 ĐẢM BẢO KHÔNG CẮT CHỮ: Merge tràn lề phải
+        ws.mergeCells(`A${r}:${END_COL}${r}`); 
+        ws.getCell(`A${r}`).value = `Tổng số tiết dạy được tính trong học kỳ ${config.semester} là:       ${tData.totalPeriods}       tiết`; 
+        ws.getCell(`A${r}`).font = { name: 'Times New Roman', size: 12 }; 
+        r++;
+        
+        ws.mergeCells(`${getColLetter(TOTAL_COLS - 3)}${r}:${END_COL}${r}`); 
+        ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).value = `Hòa Khánh, ngày       ${config.exportDate}`; 
+        ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).font = { italic: true, name: 'Times New Roman', size: 12 }; 
+        ws.getCell(`${getColLetter(TOTAL_COLS - 3)}${r}`).alignment = { horizontal: 'center' }; 
+        r++;
+        
+        // 🔥 CHIA TỶ LỆ CÂN BẰNG & ÁP DỤNG SHRINK TO FIT CHO CHỮ KÝ
+        const span1 = 3;
+        const rem = TOTAL_COLS - span1;
+        const span2 = Math.ceil(rem / 3);
+        const span3 = Math.floor((rem - span2) / 2);
         
         let c1 = 1;
         let c2 = c1 + span1;
         let c3 = c2 + span2;
         let c4 = c3 + span3;
 
-        ws.getRow(r).height = 35; // Cao lên cho chữ wrap thoải mái
-        ws.mergeCells(r, c1, r, c2 - 1); ws.getCell(r, c1).value = 'Tổ trưởng chuyên môn'; ws.getCell(r, c1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        ws.mergeCells(r, c2, r, c3 - 1); ws.getCell(r, c2).value = 'Phó Hiệu trưởng'; ws.getCell(r, c2).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        ws.mergeCells(r, c3, r, c4 - 1); ws.getCell(r, c3).value = 'Hiệu trưởng'; ws.getCell(r, c3).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        ws.mergeCells(r, c4, r, TOTAL_COLS); ws.getCell(r, c4).value = 'Người kê khai'; ws.getCell(r, c4).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.getRow(r).height = 20; 
+        ws.mergeCells(r, c1, r, c2 - 1); ws.getCell(r, c1).value = 'Tổ trưởng chuyên môn'; ws.getCell(r, c1).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+        ws.mergeCells(r, c2, r, c3 - 1); ws.getCell(r, c2).value = 'Phó Hiệu trưởng'; ws.getCell(r, c2).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+        ws.mergeCells(r, c3, r, c4 - 1); ws.getCell(r, c3).value = 'Hiệu trưởng'; ws.getCell(r, c3).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+        ws.mergeCells(r, c4, r, TOTAL_COLS); ws.getCell(r, c4).value = 'Người kê khai'; ws.getCell(r, c4).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
         for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; } 
         
-        r += 5; // Khoảng cách chữ ký
+        r += 4; // Rút ngắn lại 1 khoảng trống
         
-        ws.getRow(r).height = 35; // Đảm bảo tên không bị che khuất phần dưới
-        ws.mergeCells(r, c1, r, c2 - 1); ws.getCell(r, c1).value = config.ttcm; ws.getCell(r, c1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        ws.mergeCells(r, c2, r, c3 - 1); ws.getCell(r, c2).value = config.vicePrincipal; ws.getCell(r, c2).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        ws.mergeCells(r, c3, r, c4 - 1); ws.getCell(r, c3).value = config.principal; ws.getCell(r, c3).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        ws.mergeCells(r, c4, r, TOTAL_COLS); ws.getCell(r, c4).value = teacherName; ws.getCell(r, c4).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.getRow(r).height = 25; // Chiều cao an toàn
+        ws.mergeCells(r, c1, r, c2 - 1); ws.getCell(r, c1).value = config.ttcm; ws.getCell(r, c1).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+        ws.mergeCells(r, c2, r, c3 - 1); ws.getCell(r, c2).value = config.vicePrincipal; ws.getCell(r, c2).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+        ws.mergeCells(r, c3, r, c4 - 1); ws.getCell(r, c3).value = config.principal; ws.getCell(r, c3).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+        ws.mergeCells(r, c4, r, TOTAL_COLS); ws.getCell(r, c4).value = teacherName; ws.getCell(r, c4).alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
         for(let i=1; i<=TOTAL_COLS; i++) { const c = ws.getCell(r, i); if(c.value) c.font = { bold: true, name: 'Times New Roman', size: 12 }; }
       };
 
@@ -759,6 +768,7 @@ export const DisabilityReport: React.FC = () => {
       console.error(error); alert("Lỗi xuất báo cáo theo môn!"); 
     } finally { setIsExporting(false); }
   };
+
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-10 relative">

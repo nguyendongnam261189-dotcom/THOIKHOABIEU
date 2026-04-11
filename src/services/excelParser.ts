@@ -24,7 +24,7 @@ export interface ParseResult {
     rawSchedules: Schedule[];
     tkbTeachers: TKBTeacher[];
     pcgdTeachers: PCGDTeacher[];
-    suggestedMapping: Record<string, string>; // Vẫn giữ interface để không lỗi UI
+    suggestedMapping: Record<string, string>;
 }
 
 // ============================================================================
@@ -64,7 +64,7 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
     const shortParts = rawName.toUpperCase().trim().split(/\s+/);
     const shortFirstName = shortParts.pop() || '';
     
-    let bestMatch = rawName; // Mặc định giữ tên gốc nếu bó tay
+    let bestMatch = rawName; 
     let maxScore = 0;
 
     pcgdList.forEach(cand => {
@@ -73,23 +73,18 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
         const candNoAccent = removeAccents(candUpper);
         const firstName = cand.firstName;
         
-        // 1. Khớp chính xác 100% (Ví dụ TKB ghi đủ: Mai Thị Hiền)
         if (candUpper === shortUpper) {
             score += 10000;
         } 
         else if (candNoAccent === shortNoAccent) {
             score += 8000;
         }
-        // 2. TKB ghi Tên viết tắt (Ví dụ: "Hiền", "M.Hiền", "Ngọc Hiền")
         else if (shortUpper.includes(firstName) || firstName === shortUpper || shortFirstName === firstName) {
-            score += 500; // Cùng tên (Xác định có khả năng là cô này)
+            score += 500; 
             
-            // 🔥 BẰNG CHỨNG THÉP: Kiểm tra PCGD
-            // Nếu cô này CÓ phân công dạy LỚP NÀY và MÔN NÀY -> Chốt luôn!
             const isTeachingThisClass = cand.classes.has(className);
             let isTeachingThisSubject = false;
             
-            // Xử lý linh hoạt tên môn (Ví dụ: KHTN1 khớp với KHTN)
             cand.parsedSubjects.forEach(ps => {
                 if (ps.includes(subject.toUpperCase()) || subject.toUpperCase().includes(ps)) {
                     isTeachingThisSubject = true;
@@ -97,17 +92,17 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
             });
 
             if (isTeachingThisClass && isTeachingThisSubject) {
-                score += 5000; // Khớp Cả Lớp + Môn -> Hoàn hảo
+                score += 5000; 
             } else if (isTeachingThisSubject) {
-                score += 2000; // Khớp Môn (Dù PCGD không ghi lớp, nhưng đúng chuyên môn)
+                score += 2000; 
             } else if (candUpper.includes(shortUpper)) {
-                score += 1000; // Có chữ lót trùng khớp (VD: Ngọc Hiền trùng với Ngọc Hiền)
+                score += 1000; 
             }
         }
 
         if (score > maxScore && score >= 500) {
             maxScore = score;
-            bestMatch = cand.uniqueName; // Trả về tên Đầy đủ
+            bestMatch = cand.uniqueName; 
         }
     });
 
@@ -312,7 +307,7 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
 
                                             if (!giao_vien_raw) giao_vien_raw = 'Chưa rõ';
 
-                                            // 🔥 GỌI HÀM DỊCH TÊN CHÍNH XÁC 100% NGAY TẠI ĐÂY
+                                            // Gọi hàm dịch tên chính xác 100%
                                             const lopStr = colMap[c].className;
                                             const finalTeacherName = resolveExactTeacher(giao_vien_raw, mon, lopStr, pcgdTeachers);
 
@@ -337,7 +332,7 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                                                 rawSchedulesMap.set(key, scheduleObj);
                                             }
 
-                                            // Đưa vào danh sách TKB Teachers (dùng để hiển thị thống kê UI)
+                                            // Đưa vào danh sách hiển thị
                                             if (finalTeacherName !== 'Chưa rõ') {
                                                 if (!tkbTeachersMap.has(finalTeacherName)) {
                                                     tkbTeachersMap.set(finalTeacherName, {
@@ -357,8 +352,36 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                     }
                 });
 
-                // Do đã dịch tên trực tiếp ở trên nên bảng mapping này để rỗng để tránh UI báo sai
+                // 4. 🔥 PHỤC HỒI TỪ ĐIỂN GỢI Ý CHO GIAO DIỆN (UI) AUTO SELECT
                 const suggestedMapping: Record<string, string> = {};
+                
+                tkbTeachersMap.forEach((tkbData, resolvedName) => {
+                    // Vì resolvedName đã là tên chuẩn do resolveExactTeacher trả về
+                    // Ta chỉ cần tìm xem tên này khớp với uniqueName nào trong PCGD để gắn vào UI
+                    const exactMatch = pcgdTeachers.find(p => p.fullName === resolvedName || p.uniqueName === resolvedName);
+                    
+                    if (exactMatch) {
+                        suggestedMapping[resolvedName] = exactMatch.uniqueName; // Auto chốt đơn trên Giao diện
+                    } else {
+                        // Dành cho các trường hợp ngoại lệ (tên không có trong PCGD)
+                        let bestMatch: PCGDTeacher | null = null;
+                        let maxScore = 0;
+                        const shortUpper = resolvedName.toUpperCase().replace(/\s+/g, '');
+                        
+                        pcgdTeachers.forEach(cand => {
+                            let score = 0;
+                            const candUpper = cand.fullName.toUpperCase().replace(/\s+/g, '');
+                            if (candUpper.includes(shortUpper) || shortUpper.includes(candUpper)) score += 100;
+                            if (score > maxScore) {
+                                maxScore = score;
+                                bestMatch = cand;
+                            }
+                        });
+                        if (bestMatch && maxScore > 0) {
+                            suggestedMapping[resolvedName] = (bestMatch as PCGDTeacher).uniqueName;
+                        }
+                    }
+                });
                 
                 const rawSchedules = Array.from(rawSchedulesMap.values());
                 const tkbTeachers = Array.from(tkbTeachersMap.values());

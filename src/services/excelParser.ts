@@ -60,7 +60,6 @@ const isHDTNType = (subject: string): boolean => {
     return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT') || s.includes('CC');
 };
 
-// 🔥 HÀM MỚI: CHUẨN HÓA TÊN MÔN HỌC (GỘP KHTN) NGAY LÚC ĐỌC FILE
 const formatSubjectName = (rawName: string): string => {
     if (!rawName) return '';
     const upperName = rawName.toUpperCase().trim();
@@ -74,7 +73,7 @@ const formatSubjectName = (rawName: string): string => {
     return rawName.trim();
 };
 
-// 🔥 THUẬT TOÁN 2.0: DỊCH TÊN CỰC KỲ KHẮT KHE BẰNG BẰNG CHỨNG LỚP + MÔN TRONG 1 CỤM
+// 🔥 THUẬT TOÁN 3.0: BẰNG CHỨNG THÉP - BÓC TÁCH CHÍNH XÁC CỤM PHÂN CÔNG
 const resolveExactTeacher = (rawName: string, subject: string, className: string, pcgdList: PCGDTeacher[]): string => {
     if (!rawName || rawName === 'Chưa rõ') return 'Chưa rõ';
     
@@ -82,6 +81,7 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
     const shortNoAccent = removeAccents(shortUpper);
     const shortParts = rawName.toUpperCase().trim().split(/\s+/);
     const shortFirstName = shortParts.pop() || '';
+    const shortLastName = shortParts.length > 0 ? shortParts[0] : '';
     
     let bestMatch = rawName; 
     let maxScore = 0;
@@ -91,7 +91,14 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
         const candUpper = cand.fullName.toUpperCase().replace(/\s+/g, '');
         const candNoAccent = removeAccents(candUpper);
         const firstName = cand.firstName;
+        const lastName = cand.lastName;
         
+        // 1. Chống nhận vơ: Nếu TKB có ghi Họ (Ví dụ Mai Thị Hiền) thì tuyệt đối không khớp với (Đoàn Thị Ngọc Hiền)
+        if (shortLastName.length > 1 && lastName && shortLastName !== lastName) {
+            return; // Bỏ qua ngay lập tức
+        }
+
+        // 2. Chấm điểm cơ bản phần Tên
         if (candUpper === shortUpper) {
             score += 100000;
         } 
@@ -99,25 +106,21 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
             score += 80000;
         }
         else if (shortUpper.includes(firstName) || firstName === shortUpper || shortFirstName === firstName) {
-            score += 500; 
-            
-            let blockBonus = 0;
-            // Cắt chuỗi phân công thành từng cụm nhỏ (Ví dụ: "Toán 7/9, 9/10")
+            score += 1000; // Ít nhất là trùng Tên (Ví dụ: Vân)
+        } else {
+            return; // Tên không liên quan gì nhau -> Bỏ qua để tiết kiệm tài nguyên
+        }
+
+        // 3. TÌM BẰNG CHỨNG THÉP TRONG PCGD
+        if (score > 0) {
+            let exactBlockMatch = false;
+            // Cắt PCGD thành từng cụm nhỏ (ngăn cách bởi dấu xuống dòng hoặc chấm phẩy)
             const blocks = cand.pccmStr.replace(/\n/g, '+').replace(/;/g, '+').split('+');
+
             for (let block of blocks) {
                 const b = block.toUpperCase();
                 
-                // Tách lớp ra thành mảng để check chính xác (tránh 9/1 ăn nhầm vào 9/10)
-                const blockTokens = b.split(/[\s,.]+/);
-                const normalizedClassName = className.replace(/\./g, '/');
-                let hasClass = false;
-                for (const token of blockTokens) {
-                    if (token === normalizedClassName || token === className) {
-                        hasClass = true;
-                        break;
-                    }
-                }
-                
+                // Kiểm tra Môn trong cụm này
                 let hasSubj = false;
                 if (isHDTNType(subject) && isHDTNType(b)) {
                     hasSubj = true;
@@ -130,37 +133,40 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
                         }
                     });
                 }
-                
-                // NẾU CÙNG 1 CỤM PHÂN CÔNG MÀ CHỨA CẢ LỚP VÀ MÔN -> CHẮC CHẮN 100% LÀ NGƯỜI NÀY!
+
+                // Kiểm tra Lớp trong cụm này (Dùng Regex để đảm bảo 9/1 không ăn nhầm vào 9/10)
+                const normClass = className.replace(/\./g, '/');
+                const classRegex = new RegExp(`\\b${normClass}\\b|\\b${className}\\b`);
+                const hasClass = classRegex.test(b);
+
+                // NẾU TRONG 1 CỤM CÓ CẢ LỚP VÀ MÔN ĐANG XÉT -> BẰNG CHỨNG THÉP!
                 if (hasClass && hasSubj) {
-                    blockBonus = 20000;
+                    exactBlockMatch = true;
                     break;
                 }
             }
-            
-            score += blockBonus;
 
-            // Chấm điểm dự phòng nếu cụm phân công ghi không chuẩn
-            const isTeachingThisClass = cand.classes.has(className);
-            let isTeachingThisSubject = false;
-            cand.parsedSubjects.forEach(ps => {
-                if (ps.includes(subject.toUpperCase()) || subject.toUpperCase().includes(ps)) {
-                    isTeachingThisSubject = true;
-                }
-            });
+            if (exactBlockMatch) {
+                score += 50000; // Cộng điểm khủng để đè bẹp mọi đối thủ
+            } else {
+                // Phương án dự phòng cực kỳ khiêm tốn (chỉ dành cho PCGD ghi quá cẩu thả)
+                const teachesClass = cand.classes.has(className) || cand.classes.has(className.replace(/\./g, '/'));
+                let teachesSubj = false;
+                cand.parsedSubjects.forEach(ps => {
+                     if (ps.includes(subject.toUpperCase()) || subject.toUpperCase().includes(ps) || (isHDTNType(subject) && isHDTNType(ps))) {
+                         teachesSubj = true;
+                     }
+                });
 
-            if (blockBonus === 0) {
-                if (isTeachingThisClass && isTeachingThisSubject) {
-                    score += 5000; 
-                } else if (isTeachingThisSubject) {
-                    score += 2000; 
-                } else if (candUpper.includes(shortUpper)) {
-                    score += 1000; 
+                if (teachesClass && teachesSubj) {
+                    score += 5000; // Điểm thấp hơn rất nhiều so với Bằng chứng thép (50000)
+                } else if (teachesSubj) {
+                    score += 1000;
                 }
             }
         }
 
-        if (score > maxScore && score >= 500) {
+        if (score > maxScore && score >= 1000) {
             maxScore = score;
             bestMatch = cand.uniqueName; 
         }
@@ -370,14 +376,14 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                                             // 🔥 GỌI HÀM CHUẨN HÓA KHTN & DỊCH TÊN CHÍNH XÁC 100%
                                             const lopStr = colMap[c].className;
                                             const formattedMon = formatSubjectName(mon);
-                                            const finalTeacherName = resolveExactTeacher(giao_vien_raw, mon, lopStr, pcgdTeachers);
+                                            const finalTeacherName = resolveExactTeacher(giao_vien_raw, formattedMon, lopStr, pcgdTeachers);
 
                                             const scheduleObj: Schedule = {
                                                 thu: currentThu,
                                                 tiet: currentTiet > 5 ? currentTiet - 5 : currentTiet,
                                                 lop: lopStr,
-                                                mon: formattedMon, // Lưu tên môn đã quy đổi KHTN
-                                                giao_vien: finalTeacherName, // Lưu trực tiếp tên thật
+                                                mon: formattedMon, 
+                                                giao_vien: finalTeacherName, 
                                                 phong: '',
                                                 buoi: currentTiet > 5 ? 'Chiều' : colMap[c].buoi
                                             };
@@ -413,14 +419,14 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                     }
                 });
 
-                // 4. 🔥 PHỤC HỒI TỪ ĐIỂN GỢI Ý CHO GIAO DIỆN (UI) AUTO SELECT
+                // 4. 🔥 TẠO MAPPING CHUẨN CHO GIAO DIỆN
                 const suggestedMapping: Record<string, string> = {};
                 
                 tkbTeachersMap.forEach((tkbData, resolvedName) => {
                     const exactMatch = pcgdTeachers.find(p => p.fullName === resolvedName || p.uniqueName === resolvedName);
                     
                     if (exactMatch) {
-                        suggestedMapping[resolvedName] = exactMatch.uniqueName; // Auto chốt đơn trên Giao diện
+                        suggestedMapping[resolvedName] = exactMatch.uniqueName; 
                     } else {
                         let bestMatch: PCGDTeacher | null = null;
                         let maxScore = 0;

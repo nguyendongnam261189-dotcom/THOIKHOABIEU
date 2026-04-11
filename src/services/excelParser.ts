@@ -55,7 +55,26 @@ const cleanString = (str: any): string => {
     return String(str).normalize('NFC').trim();
 };
 
-// 🔥 HÀM MỚI: PHÂN TÍCH TÊN NGAY LÚC ĐỌC Ô EXCEL DỰA VÀO NGỮ CẢNH (MÔN + LỚP)
+const isHDTNType = (subject: string): boolean => {
+    const s = (subject || '').toUpperCase();
+    return s.includes('HDTN') || s.includes('HĐTN') || s.includes('CHÀO CỜ') || s.includes('CC-') || s.includes('SHL') || s.includes('SINH HOẠT') || s.includes('CC');
+};
+
+// 🔥 HÀM MỚI: CHUẨN HÓA TÊN MÔN HỌC (GỘP KHTN) NGAY LÚC ĐỌC FILE
+const formatSubjectName = (rawName: string): string => {
+    if (!rawName) return '';
+    const upperName = rawName.toUpperCase().trim();
+    if (isHDTNType(upperName)) return 'HĐTN';
+    
+    const khtnVariants = ['LÝ', 'HÓA', 'SINH', 'KHTN', 'KHTN 1', 'KHTN 2', 'KHTN 3', 'KHTN1', 'KHTN2', 'KHTN3'];
+    if (khtnVariants.includes(upperName)) {
+        return 'KHTN';
+    }
+    
+    return rawName.trim();
+};
+
+// 🔥 THUẬT TOÁN 2.0: DỊCH TÊN CỰC KỲ KHẮT KHE BẰNG BẰNG CHỨNG LỚP + MÔN TRONG 1 CỤM
 const resolveExactTeacher = (rawName: string, subject: string, className: string, pcgdList: PCGDTeacher[]): string => {
     if (!rawName || rawName === 'Chưa rõ') return 'Chưa rõ';
     
@@ -74,29 +93,70 @@ const resolveExactTeacher = (rawName: string, subject: string, className: string
         const firstName = cand.firstName;
         
         if (candUpper === shortUpper) {
-            score += 10000;
+            score += 100000;
         } 
         else if (candNoAccent === shortNoAccent) {
-            score += 8000;
+            score += 80000;
         }
         else if (shortUpper.includes(firstName) || firstName === shortUpper || shortFirstName === firstName) {
             score += 500; 
             
+            let blockBonus = 0;
+            // Cắt chuỗi phân công thành từng cụm nhỏ (Ví dụ: "Toán 7/9, 9/10")
+            const blocks = cand.pccmStr.replace(/\n/g, '+').replace(/;/g, '+').split('+');
+            for (let block of blocks) {
+                const b = block.toUpperCase();
+                
+                // Tách lớp ra thành mảng để check chính xác (tránh 9/1 ăn nhầm vào 9/10)
+                const blockTokens = b.split(/[\s,.]+/);
+                const normalizedClassName = className.replace(/\./g, '/');
+                let hasClass = false;
+                for (const token of blockTokens) {
+                    if (token === normalizedClassName || token === className) {
+                        hasClass = true;
+                        break;
+                    }
+                }
+                
+                let hasSubj = false;
+                if (isHDTNType(subject) && isHDTNType(b)) {
+                    hasSubj = true;
+                } else if (b.includes(subject.toUpperCase())) {
+                    hasSubj = true;
+                } else {
+                    cand.parsedSubjects.forEach(ps => {
+                        if (b.includes(ps) && (ps.includes(subject.toUpperCase()) || subject.toUpperCase().includes(ps))) {
+                            hasSubj = true;
+                        }
+                    });
+                }
+                
+                // NẾU CÙNG 1 CỤM PHÂN CÔNG MÀ CHỨA CẢ LỚP VÀ MÔN -> CHẮC CHẮN 100% LÀ NGƯỜI NÀY!
+                if (hasClass && hasSubj) {
+                    blockBonus = 20000;
+                    break;
+                }
+            }
+            
+            score += blockBonus;
+
+            // Chấm điểm dự phòng nếu cụm phân công ghi không chuẩn
             const isTeachingThisClass = cand.classes.has(className);
             let isTeachingThisSubject = false;
-            
             cand.parsedSubjects.forEach(ps => {
                 if (ps.includes(subject.toUpperCase()) || subject.toUpperCase().includes(ps)) {
                     isTeachingThisSubject = true;
                 }
             });
 
-            if (isTeachingThisClass && isTeachingThisSubject) {
-                score += 5000; 
-            } else if (isTeachingThisSubject) {
-                score += 2000; 
-            } else if (candUpper.includes(shortUpper)) {
-                score += 1000; 
+            if (blockBonus === 0) {
+                if (isTeachingThisClass && isTeachingThisSubject) {
+                    score += 5000; 
+                } else if (isTeachingThisSubject) {
+                    score += 2000; 
+                } else if (candUpper.includes(shortUpper)) {
+                    score += 1000; 
+                }
             }
         }
 
@@ -307,15 +367,16 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
 
                                             if (!giao_vien_raw) giao_vien_raw = 'Chưa rõ';
 
-                                            // Gọi hàm dịch tên chính xác 100%
+                                            // 🔥 GỌI HÀM CHUẨN HÓA KHTN & DỊCH TÊN CHÍNH XÁC 100%
                                             const lopStr = colMap[c].className;
+                                            const formattedMon = formatSubjectName(mon);
                                             const finalTeacherName = resolveExactTeacher(giao_vien_raw, mon, lopStr, pcgdTeachers);
 
                                             const scheduleObj: Schedule = {
                                                 thu: currentThu,
                                                 tiet: currentTiet > 5 ? currentTiet - 5 : currentTiet,
                                                 lop: lopStr,
-                                                mon: mon,
+                                                mon: formattedMon, // Lưu tên môn đã quy đổi KHTN
                                                 giao_vien: finalTeacherName, // Lưu trực tiếp tên thật
                                                 phong: '',
                                                 buoi: currentTiet > 5 ? 'Chiều' : colMap[c].buoi
@@ -332,7 +393,7 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                                                 rawSchedulesMap.set(key, scheduleObj);
                                             }
 
-                                            // Đưa vào danh sách hiển thị
+                                            // Đưa vào danh sách TKB Teachers (dùng để hiển thị thống kê UI)
                                             if (finalTeacherName !== 'Chưa rõ') {
                                                 if (!tkbTeachersMap.has(finalTeacherName)) {
                                                     tkbTeachersMap.set(finalTeacherName, {
@@ -342,7 +403,7 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                                                     });
                                                 }
                                                 const tData = tkbTeachersMap.get(finalTeacherName)!;
-                                                tData.subjectCounts.set(mon, (tData.subjectCounts.get(mon) || 0) + 1);
+                                                tData.subjectCounts.set(formattedMon, (tData.subjectCounts.get(formattedMon) || 0) + 1);
                                             }
                                         }
                                     }
@@ -356,14 +417,11 @@ export const parseExcelFile = async (file: File): Promise<ParseResult> => {
                 const suggestedMapping: Record<string, string> = {};
                 
                 tkbTeachersMap.forEach((tkbData, resolvedName) => {
-                    // Vì resolvedName đã là tên chuẩn do resolveExactTeacher trả về
-                    // Ta chỉ cần tìm xem tên này khớp với uniqueName nào trong PCGD để gắn vào UI
                     const exactMatch = pcgdTeachers.find(p => p.fullName === resolvedName || p.uniqueName === resolvedName);
                     
                     if (exactMatch) {
                         suggestedMapping[resolvedName] = exactMatch.uniqueName; // Auto chốt đơn trên Giao diện
                     } else {
-                        // Dành cho các trường hợp ngoại lệ (tên không có trong PCGD)
                         let bestMatch: PCGDTeacher | null = null;
                         let maxScore = 0;
                         const shortUpper = resolvedName.toUpperCase().replace(/\s+/g, '');

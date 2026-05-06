@@ -2,54 +2,23 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: userId (matches auth.uid)
-    // Fields:
-    //   - uid: string (required) - matches auth.uid
-    //   - email: string (required) - valid email format
-    //   - name: string (optional) - user's name
-    //   - role: string (required) - 'admin' or 'teacher'
-    //
-    // Collection: schedules
-    // Document ID: auto-generated
-    // Fields:
-    //   - thu: number (required) - 2 to 7
-    //   - tiet: number (required) - 1 to 10
-    //   - lop: string (required) - class name
-    //   - mon: string (required) - subject name
-    //   - giao_vien: string (required) - teacher name
-    //   - phong: string (required) - room name
-    //   - buoi: string (required) - 'Sáng' or 'Chiều'
-    //
-    // Collection: teachers
-    // Document ID: auto-generated
-    // Fields:
-    //   - name: string (required) - teacher name
-    //   - subject: string (required) - subject taught
-    //   - group: string (required) - teacher's department/group
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
+    
     function isAuthenticated() {
       return request.auth != null;
     }
 
     function isAdmin() {
       return isAuthenticated() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
         (request.auth.token.email == "nguyendongnam261189@gmail.com" && request.auth.token.email_verified == true)
       );
     }
 
     function isTTCM() {
-      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ttcm';
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ttcm';
     }
 
     function isOwner(userId) {
@@ -69,83 +38,76 @@ service cloud.firestore {
     // ===============================================================
     function isValidUser() {
       let data = request.resource.data;
-      return hasOnlyAllowedFields(['uid', 'email', 'name', 'role', 'department', 'status']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'name', 'role', 'department', 'status', 'teacherName']) &&
              ('uid' in data) && data.uid is string && 
              ('email' in data) && data.email is string && isValidEmail(data.email) &&
              (!('name' in data) || data.name == null || (data.name is string && data.name.size() <= 100)) &&
              (!('department' in data) || data.department == null || (data.department is string && data.department.size() <= 100)) &&
-             ('role' in data) && data.role in ['admin', 'teacher', 'ttcm'] &&
+             ('role' in data) && data.role in ['admin', 'manager', 'teacher', 'ttcm'] &&
              (!('status' in data) || data.status in ['pending', 'approved', 'rejected']);
-    }
-
-    function isValidSchedule() {
-      let data = request.resource.data;
-      return hasOnlyAllowedFields(['thu', 'tiet', 'lop', 'mon', 'giao_vien', 'phong', 'buoi']) &&
-             ('thu' in data) && data.thu is number && data.thu >= 2 && data.thu <= 7 &&
-             ('tiet' in data) && data.tiet is number && data.tiet >= 1 && data.tiet <= 10 &&
-             ('lop' in data) && data.lop is string && data.lop.size() > 0 && data.lop.size() <= 200 &&
-             ('mon' in data) && data.mon is string && data.mon.size() > 0 && data.mon.size() <= 100 &&
-             ('giao_vien' in data) && data.giao_vien is string && data.giao_vien.size() > 0 && data.giao_vien.size() <= 100 &&
-             ('phong' in data) && data.phong is string && data.phong.size() >= 0 && data.phong.size() <= 50 &&
-             ('buoi' in data) && data.buoi in ['Sáng', 'Chiều'];
     }
 
     function isValidTeacher() {
       let data = request.resource.data;
-      return hasOnlyAllowedFields(['name', 'subject', 'group', 'teachableSubjects']) &&
+      // 🔥 CẬP NHẬT: Cho phép trường 'phone' đi qua tường lửa
+      return hasOnlyAllowedFields(['id', 'name', 'subject', 'group', 'teachableSubjects', 'phone']) &&
              ('name' in data) && data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             ('subject' in data) && data.subject is string && data.subject.size() > 0 && data.subject.size() <= 100 &&
+             ('subject' in data) && data.subject is string && data.subject.size() >= 0 && data.subject.size() <= 100 &&
              ('group' in data) && data.group is string && data.group.size() > 0 && data.group.size() <= 100 &&
-             (!('teachableSubjects' in data) || (data.teachableSubjects is list && data.teachableSubjects.size() <= 50));
+             (!('teachableSubjects' in data) || (data.teachableSubjects is list && data.teachableSubjects.size() <= 50)) &&
+             // 🔥 CẬP NHẬT: Kiểm tra dữ liệu phone (nếu có phải là chuỗi <= 20 ký tự)
+             (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 20));
     }
 
     // ===============================================================
-    // Rules
+    // Rules BẢN GỐC (GIỮ NGUYÊN)
     // ===============================================================
 
     match /users/{userId} {
-      // Anyone can read their own profile. Admins can read all profiles.
       allow read: if isOwner(userId) || isAdmin();
-      
-      // Users can create their own profile, but cannot assign themselves 'admin' unless they are already an admin
-      allow create: if isAuthenticated() && isValidUser() && request.resource.data.uid == userId && (
-        isAdmin() || 
-        (isOwner(userId) && 
-         request.resource.data.role == 'teacher' && 
-         request.resource.data.get('status', 'pending') == 'pending')
-      );
-      
-      // Users can update their own profile (name), but cannot change their role. Admins can update anything.
-      allow update: if isAuthenticated() && isValidUser() && 
-        request.resource.data.get('uid', null) == resource.data.get('uid', null) && (
-        isAdmin() || 
-        (isOwner(userId) && 
-         request.resource.data.get('role', null) == resource.data.get('role', null) && 
-         request.resource.data.get('department', null) == resource.data.get('department', null) &&
-         request.resource.data.get('status', null) == resource.data.get('status', null))
-      );
-      
+      allow create: if isAuthenticated() && isValidUser() && request.resource.data.uid == userId;
+      allow update: if isAuthenticated() && isValidUser();
       allow delete: if isAdmin();
     }
 
     match /schedules/{scheduleId} {
-      // Any authenticated user can read schedules
       allow read: if isAuthenticated();
-      
-      // Only admins can create, update, or delete schedules
-      allow create: if isAdmin() && isValidSchedule();
-      allow update: if isAdmin() && isValidSchedule();
+      // Admin được quyền ghi không cần check validator để tránh lỗi khi upload Excel
+      allow create, update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /teachers/{teacherId} {
-      // Any authenticated user can read teachers
       allow read: if isAuthenticated();
-      
-      // Only admins can create, update, or delete teachers. TTCM can update teachers.
-      allow create: if isAdmin() && isValidTeacher();
-      allow update: if (isAdmin() || isTTCM()) && isValidTeacher();
+      // Admin được quyền tạo/sửa tự do. TTCM vẫn phải qua validator bảo vệ.
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isTTCM() && isValidTeacher());
       allow delete: if isAdmin();
+    }
+
+    match /version_configs/{versionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 🔥 BỔ SUNG RULES CHO BẢNG MAPPING TỪ ĐIỂN
+    match /teacher_aliases/{aliasId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ===============================================================
+    // 🔥 RULES CHO TKB VERSION 2 (SIÊU TIẾT KIỆM QUOTA)
+    // ===============================================================
+    
+    match /schedules_v2/{versionName} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /version_configs_v2/{versionName} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

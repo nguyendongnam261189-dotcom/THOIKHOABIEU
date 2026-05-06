@@ -100,12 +100,12 @@ service cloud.firestore {
     // 🔥 RULES CHO TKB VERSION 2 (SIÊU TIẾT KIỆM QUOTA)
     // ===============================================================
     
-    match /schedules_v2/{versionName} {
+    match /schedules/{versionName} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    match /version_configs_v2/{versionName} {
+    match /version_configs/{versionName} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }

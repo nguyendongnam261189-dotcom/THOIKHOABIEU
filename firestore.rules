@@ -49,18 +49,16 @@ service cloud.firestore {
 
     function isValidTeacher() {
       let data = request.resource.data;
-      // 🔥 CẬP NHẬT: Cho phép trường 'phone' đi qua tường lửa
       return hasOnlyAllowedFields(['id', 'name', 'subject', 'group', 'teachableSubjects', 'phone']) &&
              ('name' in data) && data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              ('subject' in data) && data.subject is string && data.subject.size() >= 0 && data.subject.size() <= 100 &&
              ('group' in data) && data.group is string && data.group.size() > 0 && data.group.size() <= 100 &&
              (!('teachableSubjects' in data) || (data.teachableSubjects is list && data.teachableSubjects.size() <= 50)) &&
-             // 🔥 CẬP NHẬT: Kiểm tra dữ liệu phone (nếu có phải là chuỗi <= 20 ký tự)
              (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 20));
     }
 
     // ===============================================================
-    // Rules BẢN GỐC (GIỮ NGUYÊN)
+    // QUY TẮC BẢO MẬT CHÍNH THỨC
     // ===============================================================
 
     match /users/{userId} {
@@ -70,42 +68,25 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /schedules/{scheduleId} {
-      allow read: if isAuthenticated();
-      // Admin được quyền ghi không cần check validator để tránh lỗi khi upload Excel
-      allow create, update: if isAdmin();
-      allow delete: if isAdmin();
-    }
-
     match /teachers/{teacherId} {
       allow read: if isAuthenticated();
-      // Admin được quyền tạo/sửa tự do. TTCM vẫn phải qua validator bảo vệ.
       allow create: if isAdmin();
       allow update: if isAdmin() || (isTTCM() && isValidTeacher());
       allow delete: if isAdmin();
     }
 
-    match /version_configs/{versionId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
-    }
-
-    // 🔥 BỔ SUNG RULES CHO BẢNG MAPPING TỪ ĐIỂN
     match /teacher_aliases/{aliasId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // 🔥 RULES CHO TKB VERSION 2 (SIÊU TIẾT KIỆM QUOTA)
-    // ===============================================================
-    
-    match /schedules/{versionName} {
+    // 🔥 TKB VERSION 2 (Gói gọn 1 Document)
+    match /schedules/{documentId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    match /version_configs/{versionName} {
+    match /version_configs/{documentId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
